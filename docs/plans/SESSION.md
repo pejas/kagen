@@ -18,8 +18,9 @@ Consolidate the steps already partially implemented in the root command into a r
 
 1. Detect missing bootstrap files → direct user to `kagen init`.
 2. Verify runtime dependencies (Stage 2).
-3. Agent selection (Stage 1).
-4. Start Colima/K3s (Stage 2).
+3. Parse `devfile.yaml` to define the baseline environment (Stage 1.5).
+4. Agent selection and injection (Stage 1).
+5. Start Colima/K3s (Stage 2).
 5. Create namespace and resources (Stage 3).
 6. Deploy Forgejo and import repo (Stage 4).
 7. Deploy proxy and validate enforcement (Stage 6).
