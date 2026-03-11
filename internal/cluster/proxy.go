@@ -24,6 +24,7 @@ const (
 	proxyConfigMapName  = "egress-proxy-config"
 	proxyImage          = "docker.io/alpine:3.22"
 	proxyPort           = 8888
+	proxyConfigDir      = "/etc/kagen-proxy"
 )
 
 // EnsureProxy reconciles the repo-scoped proxy workload, service, and egress policy.
@@ -135,10 +136,10 @@ DisableViaHeader Yes
 ConnectPort 80
 ConnectPort 443
 ConnectPort 22
-Filter "/etc/tinyproxy/allowlist"
+Filter "%s/allowlist"
 FilterURLs On
 FilterDefaultDeny Yes
-`, proxyPort)
+`, proxyPort, proxyConfigDir)
 }
 
 func proxyAllowlist(destinations []string) string {
@@ -192,7 +193,7 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 							Args: []string{
 								`set -eu
 apk add --no-cache tinyproxy >/dev/null
-exec tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf`,
+exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`,
 							},
 							Ports: []corev1.ContainerPort{
 								{
@@ -210,7 +211,7 @@ exec tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf`,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "config",
-									MountPath: "/etc/tinyproxy",
+									MountPath: proxyConfigDir,
 									ReadOnly:  true,
 								},
 							},

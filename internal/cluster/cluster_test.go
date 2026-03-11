@@ -115,3 +115,16 @@ func TestInjectAgentRuntimeSkipsProxyEnvWithoutPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestTinyproxyConfigUsesDedicatedConfigDir(t *testing.T) {
+	t.Parallel()
+
+	cfg := tinyproxyConfig()
+
+	if !strings.Contains(cfg, `Filter "`+proxyConfigDir+`/allowlist"`) {
+		t.Fatalf("tinyproxyConfig() missing dedicated allowlist path: %q", cfg)
+	}
+	if strings.Contains(cfg, "/etc/tinyproxy/allowlist") {
+		t.Fatalf("tinyproxyConfig() still references package config path: %q", cfg)
+	}
+}
