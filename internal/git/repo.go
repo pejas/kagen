@@ -1,7 +1,9 @@
-// Package git provides Git repository detection and branch operations for kagen.
 package git
 
 import (
+	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,6 +23,13 @@ type Repository struct {
 
 	// HeadSHA is the full SHA of HEAD.
 	HeadSHA string
+}
+
+// ID returns a unique short identifier for the repository based on its path.
+func (r *Repository) ID() string {
+	h := sha1.New()
+	h.Write([]byte(r.Path))
+	return hex.EncodeToString(h.Sum(nil))[:8]
 }
 
 // KagenBranch returns the in-cluster branch name for this repository,
@@ -92,6 +101,69 @@ func headSHA(repoRoot string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// AddRemote adds a new remote to the repository. If it already exists, it is updated.
+func (r *Repository) AddRemote(name, url string) error {
+	// Try to add. If it exists, this will fail.
+	_, err := gitCommand(r.Path, "remote", "add", name, url)
+	if err != nil {
+		// Try to set-url instead
+		_, err = gitCommand(r.Path, "remote", "set-url", name, url)
+		if err != nil {
+			return fmt.Errorf("failed to add or update remote: %w", err)
+		}
+	}
+	return nil
+}
+
+// Push pushes the specified ref to the given remote.
+func (r *Repository) Push(ctx context.Context, remote, ref string) error {
+	_, err := gitCommand(r.Path, "push", "-f", remote, ref)
+	if err != nil {
+		return fmt.Errorf("git push %s %s: %w", remote, ref, err)
+	}
+	return nil
+}
+
+// Fetch fetches from the specified remote.
+func (r *Repository) Fetch(ctx context.Context, remote string) error {
+	_, err := gitCommand(r.Path, "fetch", remote)
+	if err != nil {
+		return fmt.Errorf("git fetch %s: %w", remote, err)
+	}
+	return nil
+}
+
+// Merge merges the specified ref into the current branch.
+func (r *Repository) Merge(ctx context.Context, ref string) error {
+	_, err := gitCommand(r.Path, "merge", "--no-edit", ref)
+	if err != nil {
+		return fmt.Errorf("git merge %s: %w", ref, err)
+	}
+	return nil
+}
+
+// HasUncommittedChanges checks if there are uncommitted changes in the worktree.
+func (r *Repository) HasUncommittedChanges() bool {
+	out, err := gitCommand(r.Path, "status", "--porcelain")
+	if err != nil {
+		return true // Assume dirty on error.
+	}
+	return len(strings.TrimSpace(out)) > 0
+}
+
+// Commit creates a new commit with all changes (WIP).
+func (r *Repository) Commit(message string) error {
+	_, err := gitCommand(r.Path, "add", "-A")
+	if err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	_, err = gitCommand(r.Path, "commit", "-m", message)
+	if err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	return nil
 }
 
 // gitCommand runs a git command in the given directory and returns stdout.

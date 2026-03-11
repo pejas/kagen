@@ -39,6 +39,9 @@ type Manager interface {
 
 	// Status returns the current runtime status.
 	Status(ctx context.Context) (Status, error)
+
+	// KubeContext returns the kubectl context name for this runtime.
+	KubeContext() string
 }
 
 // StubManager is a placeholder implementation that returns ErrNotImplemented.
@@ -52,6 +55,11 @@ func (s *StubManager) EnsureRunning(_ context.Context) error {
 // Status returns ErrNotImplemented.
 func (s *StubManager) Status(_ context.Context) (Status, error) {
 	return StatusUnknown, fmt.Errorf("runtime status: %w", kagerr.ErrNotImplemented)
+}
+
+// KubeContext returns a dummy context for the stub.
+func (s *StubManager) KubeContext() string {
+	return "stub-context"
 }
 
 // NewStubManager returns a new StubManager.

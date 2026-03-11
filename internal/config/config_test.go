@@ -53,7 +53,7 @@ func TestLoadFromConfigFile(t *testing.T) {
 	}
 
 	configContent := []byte("agent: opencode\nforgejo_http_port: 4000\n")
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), configContent, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "main.yml"), configContent, 0o644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
 
@@ -69,5 +69,42 @@ func TestLoadFromConfigFile(t *testing.T) {
 	}
 	if cfg.ForgejoHTTPPort != 4000 {
 		t.Errorf("expected ForgejoHTTPPort=4000 from file, got %d", cfg.ForgejoHTTPPort)
+	}
+}
+
+func TestLoadHierarchy(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".config", "kagen")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("failed to create config dir: %v", err)
+	}
+
+	// Global config.
+	if err := os.WriteFile(filepath.Join(configDir, "main.yml"), []byte("agent: global\nverbose: true\n"), 0o644); err != nil {
+		t.Fatalf("failed to write global config: %v", err)
+	}
+
+	// Project config (in current working directory of the test).
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	projectDir := t.TempDir()
+	os.Chdir(projectDir)
+
+	if err := os.WriteFile(".kagen.yaml", []byte("agent: project\n"), 0o644); err != nil {
+		t.Fatalf("failed to write project config: %v", err)
+	}
+
+	t.Setenv("HOME", tmpDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	if cfg.Agent != "project" {
+		t.Errorf("expected Agent=project (override), got %q", cfg.Agent)
+	}
+	if !cfg.Verbose {
+		t.Error("expected Verbose=true (inherited from global)")
 	}
 }

@@ -15,6 +15,19 @@ const defaultDevfileContent = `schemaVersion: 2.2.0
 metadata:
   name: kagen-workspace
   version: 1.0.0
+components:
+  - name: agent
+    container:
+      image: node:20-slim
+      command: ["tail", "-f", "/dev/null"]
+      env:
+        - name: PROMPT_COMMAND
+          value: "history -a; history -c; history -r"
+      volumeMounts:
+        - name: agent-auth
+          path: /home/node/.claude
+        - name: projects
+          path: /projects
 `
 
 // defaultKagenConfig is the default project-level kagen config.
@@ -34,7 +47,8 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Bootstrap local project configuration",
 	Long: `Initialize a kagen project in the current repository.
-Creates devfile.yaml and .kagen.yaml if they do not already exist.
+Creates devfile.yaml if it does not already exist. 
+Project-specific overrides can be added manually to .kagen.yaml if needed.
 This command is idempotent — running it again is a safe no-op.`,
 	RunE: runInit,
 }
@@ -46,8 +60,6 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 
 	devfilePath := filepath.Join(cwd, "devfile.yaml")
-	kagenConfigPath := filepath.Join(cwd, ".kagen.yaml")
-
 	created := false
 
 	devfileCreated, err := createIfMissing(devfilePath, defaultDevfileContent)
@@ -56,15 +68,6 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 	if devfileCreated {
 		ui.Success("Created %s", devfilePath)
-		created = true
-	}
-
-	kagenCreated, err := createIfMissing(kagenConfigPath, defaultKagenConfig)
-	if err != nil {
-		return err
-	}
-	if kagenCreated {
-		ui.Success("Created %s", kagenConfigPath)
 		created = true
 	}
 

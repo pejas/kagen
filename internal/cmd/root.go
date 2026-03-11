@@ -13,6 +13,7 @@ import (
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/config"
+	"github.com/pejas/kagen/internal/devfile"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
@@ -113,7 +114,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	// 4. Ensure local runtime is healthy.
 	ui.Info("Ensuring local runtime is healthy...")
-	rtm := runtime.NewStubManager()
+	rtm := runtime.NewColimaManager(cfg.Runtime)
 	if err := rtm.EnsureRunning(ctx); err != nil {
 		if errors.Is(err, kagerr.ErrNotImplemented) {
 			ui.Warn("Runtime management not yet implemented — skipping")
@@ -123,14 +124,26 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 
 	// 5. Ensure cluster resources.
-	ui.Info("Ensuring cluster resources for %s...", repo.KagenBranch())
-	cm := cluster.NewStubManager()
+	ui.Info("Ensuring cluster resources...")
+	kubeCtx := rtm.KubeContext()
+	cm, err := cluster.NewKubeManager(kubeCtx)
+	if err != nil {
+		return fmt.Errorf("initializing cluster manager: %w", err)
+	}
+
+	// 5.1 Parse Devfile for resource generation
+	devfilePath := "devfile.yaml" // TODO: make configurable
+	d, err := devfile.Parse(devfilePath)
+	if err != nil {
+		return fmt.Errorf("parsing devfile: %w", err)
+	}
+
 	if err := cm.EnsureNamespace(ctx, repo); err != nil {
-		if errors.Is(err, kagerr.ErrNotImplemented) {
-			ui.Warn("Cluster management not yet implemented — skipping")
-		} else {
-			return fmt.Errorf("ensuring namespace: %w", err)
-		}
+		return fmt.Errorf("ensuring namespace: %w", err)
+	}
+
+	if err := cm.EnsureResources(ctx, repo, d); err != nil {
+		return fmt.Errorf("ensuring resources: %w", err)
 	}
 
 	// 6. Record import provenance.
@@ -139,13 +152,19 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	// 7. Import repository to Forgejo.
 	ui.Info("Importing repository to Forgejo...")
-	fs := forgejo.NewStubService()
+	clientset, err := cluster.NewClientset(kubeCtx)
+	if err != nil {
+		return fmt.Errorf("creating kubernetes clientset: %w", err)
+	}
+	pf := cluster.NewPortForwarder()
+	fs := forgejo.NewForgejoService(clientset, pf)
+
+	if err := fs.EnsureRepo(ctx, repo); err != nil {
+		return fmt.Errorf("ensuring forgejo repo: %w", err)
+	}
+
 	if err := fs.ImportRepo(ctx, repo); err != nil {
-		if errors.Is(err, kagerr.ErrNotImplemented) {
-			ui.Warn("Forgejo integration not yet implemented — skipping")
-		} else {
-			return fmt.Errorf("importing to forgejo: %w", err)
-		}
+		return fmt.Errorf("importing to forgejo: %w", err)
 	}
 
 	// 8. Launch and attach agent.

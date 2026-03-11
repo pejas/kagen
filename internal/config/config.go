@@ -25,6 +25,17 @@ type Config struct {
 
 	// Verbose enables verbose output.
 	Verbose bool `mapstructure:"verbose"`
+
+	// Runtime contains configuration for the Colima runtime.
+	Runtime RuntimeConfig `mapstructure:"runtime"`
+}
+
+// RuntimeConfig holds Colima-specific settings.
+type RuntimeConfig struct {
+	CPU            int    `mapstructure:"cpu"`
+	Memory         int    `mapstructure:"memory"`
+	Disk           int    `mapstructure:"disk"`
+	StartupTimeout string `mapstructure:"startup_timeout"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -35,40 +46,54 @@ func DefaultConfig() *Config {
 		ForgejoHTTPPort: 3000,
 		ForgejoSSHPort:  2222,
 		Verbose:         false,
+		Runtime: RuntimeConfig{
+			CPU:            4,
+			Memory:         8,
+			Disk:           60,
+			StartupTimeout: "5m",
+		},
 	}
 }
 
-// Load reads configuration from the config file (~/.config/kagen/config.yaml),
-// environment variables (KAGEN_*), and returns the merged Config.
+// Load reads configuration from:
+// 1. Global config (~/.config/kagen/main.yml)
+// 2. Project config (.kagen.yaml in repo root)
+// 3. Environment variables (KAGEN_*)
+// 4. CLI flags (bound in cmd package)
 func Load() (*Config, error) {
 	v := viper.New()
 
-	// Defaults.
-	v.SetDefault("agent", "")
-	v.SetDefault("proxy_allowlist", []string{})
-	v.SetDefault("forgejo_http_port", 3000)
-	v.SetDefault("forgejo_ssh_port", 2222)
-	v.SetDefault("verbose", false)
+	// 1. Set Defaults
+	setDefaults(v)
 
-	// Config file location.
+	// 2. Load Global Config (~/.config/kagen/main.yml)
 	configDir, err := configDirectory()
-	if err != nil {
-		return nil, fmt.Errorf("resolving config directory: %w", err)
-	}
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(configDir)
-
-	// Environment variable overrides.
-	v.SetEnvPrefix("KAGEN")
-	v.AutomaticEnv()
-
-	// Read config file (ignore "not found" — it's optional).
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return nil, fmt.Errorf("reading config file: %w", err)
+	if err == nil {
+		v.AddConfigPath(configDir)
+		v.SetConfigName("main")
+		v.SetConfigType("yaml")
+		if err := v.ReadInConfig(); err != nil {
+			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+				return nil, fmt.Errorf("reading global config: %w", err)
+			}
 		}
 	}
+
+	// 3. Load Project Config (.kagen.yaml)
+	// We search in the current directory.
+	v.AddConfigPath(".")
+	v.SetConfigName(".kagen")
+	v.SetConfigType("yaml")
+	// MergeInConfig merges the current file into the existing config.
+	if err := v.MergeInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return nil, fmt.Errorf("merging project config: %w", err)
+		}
+	}
+
+	// 4. Environment variable overrides
+	v.SetEnvPrefix("KAGEN")
+	v.AutomaticEnv()
 
 	cfg := DefaultConfig()
 	if err := v.Unmarshal(cfg); err != nil {
@@ -76,6 +101,18 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func setDefaults(v *viper.Viper) {
+	v.SetDefault("agent", "")
+	v.SetDefault("proxy_allowlist", []string{})
+	v.SetDefault("forgejo_http_port", 3000)
+	v.SetDefault("forgejo_ssh_port", 2222)
+	v.SetDefault("verbose", false)
+	v.SetDefault("runtime.cpu", 4)
+	v.SetDefault("runtime.memory", 8)
+	v.SetDefault("runtime.disk", 60)
+	v.SetDefault("runtime.startup_timeout", "5m")
 }
 
 // configDirectory returns the path to the kagen config directory,

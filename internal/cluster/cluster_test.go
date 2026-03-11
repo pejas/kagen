@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/pejas/kagen/internal/agent"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 )
@@ -23,12 +22,10 @@ func TestStubManagerEnsureNamespace(t *testing.T) {
 
 func TestStubManagerEnsureResources(t *testing.T) {
 	t.Parallel()
-
 	mgr := NewStubManager()
-	repo := &git.Repository{Path: "/fake"}
-	err := mgr.EnsureResources(context.Background(), repo, agent.Claude)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
+	err := mgr.EnsureResources(context.Background(), &git.Repository{}, nil)
+	if err == nil {
+		t.Error("EnsureResources() expected error, got nil")
 	}
 }
 

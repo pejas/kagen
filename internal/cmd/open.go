@@ -9,9 +9,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/pejas/kagen/internal/cluster"
+	"github.com/pejas/kagen/internal/config"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/runtime"
 	"github.com/pejas/kagen/internal/ui"
 )
 
@@ -27,17 +30,35 @@ message is displayed instead of opening a dead page.`,
 func runOpen(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
+	// 1. Discover repo
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
 	}
-
 	repo, err := git.Discover(cwd)
 	if err != nil {
 		return fmt.Errorf("discovering repository: %w", err)
 	}
 
-	svc := forgejo.NewStubService()
+	// 2. Load config
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// 3. Setup runtime to get kube context
+	rtm := runtime.NewColimaManager(cfg.Runtime)
+	kubeCtx := rtm.KubeContext()
+
+	// 4. Setup Forgejo service
+	clientset, err := cluster.NewClientset(kubeCtx)
+	if err != nil {
+		return fmt.Errorf("creating kubernetes clientset: %w", err)
+	}
+	pf := cluster.NewPortForwarder()
+	svc := forgejo.NewForgejoService(clientset, pf)
+
+	// In Stage 4, we assume the environment is running if we're calling open.
 
 	// Check for reviewable changes first.
 	hasCommits, err := svc.HasNewCommits(ctx, repo)
