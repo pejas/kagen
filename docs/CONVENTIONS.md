@@ -14,16 +14,26 @@
 - **Cobra**: Use for command definition.
 - **Viper**: Use for configuration loading and environment overrides.
 - **Defaults**: Define all default configuration values in `internal/config/config.go`.
+- **Validation**: Add configuration validation in `internal/config/validate.go`; run it before orchestration begins.
 
-## Interface vs. Implementation
-- Infrastructure-heavy packages (runtime, cluster, forgejo, agent) should define an interface.
-- Provide a `stub.go` implementation in each package for local development and testing without dependencies.
-- Use `New[Service](...)` constructors to inject dependencies (e.g., K8s clientset, port-forwarder).
+## Orchestration Responsibilities
+- Split host-side orchestration into narrow coordinators (runtime bootstrap, devfile validation, forgejo sync, agent launch) and invoke them from `internal/cmd`.
+- Keep `internal/cmd` free of shell-outs; coordinators should call injected services instead.
 
-## Kubernetes (client-go)
+## Interfaces, Implementations, and Surface Area
+- Infrastructure-heavy packages (runtime, cluster, forgejo, agent) should define interfaces and keep implementations in `internal` subpackages.
+- Provide `stub.go` implementations to aid testing without external dependencies.
+- Export only constructors, interfaces, and sentinel errors; unexport helper structs such as BaseAgent when feasible.
+
+## Kubernetes (client-go) and Adapters
 - Prefer `client-go` for resource management.
-- Avoid shell-ing out to `kubectl` except for interactive TUI attachment (`exec -it`) or port-forwarding processes.
-- Ensure all created resources are labeled with `kagen.io/repo-id`.
+- Centralise `kubectl` usage in shared adapters: port-forwarder and exec wrapper.
+- Avoid additional shell-outs from business logic; reuse the adapters.
+- Ensure all created resources carry `kagen.io/repo-id` labels.
+
+## Proxy & Egress
+- Load proxy policy from configuration and validate it before attaching to the agent; fail closed when unenforced.
+- Add proxy reconciliation hooks in the cluster layer when implementing proxy pods.
 
 ## Testing
 - **Table-Driven Tests**: Use table-driven tests for complex logic.
