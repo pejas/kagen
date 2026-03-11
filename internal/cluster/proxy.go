@@ -2,6 +2,8 @@ package cluster
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -25,6 +27,7 @@ const (
 	proxyImage          = "docker.io/alpine:3.22"
 	proxyPort           = 8888
 	proxyConfigDir      = "/etc/kagen-proxy"
+	proxyConfigChecksum = "kagen.io/proxy-config-sha256"
 )
 
 // EnsureProxy reconciles the repo-scoped proxy workload, service, and egress policy.
@@ -34,13 +37,14 @@ func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, pol
 		return k.deleteProxyResources(ctx, nsName)
 	}
 
-	if err := k.ensureProxyConfig(ctx, nsName, repo.ID(), policy); err != nil {
+	checksum, err := k.ensureProxyConfig(ctx, nsName, repo.ID(), policy)
+	if err != nil {
 		return err
 	}
 	if err := k.ensureProxyService(ctx, nsName, repo.ID()); err != nil {
 		return err
 	}
-	if err := k.ensureProxyDeployment(ctx, nsName, repo.ID()); err != nil {
+	if err := k.ensureProxyDeployment(ctx, nsName, repo.ID(), checksum); err != nil {
 		return err
 	}
 	if err := k.ensureAgentNetworkPolicy(ctx, nsName, repo.ID()); err != nil {
@@ -84,7 +88,7 @@ func (k *KubeManager) ProxyReady(ctx context.Context, repo *git.Repository) (boo
 	return deployment.Status.ReadyReplicas > 0, nil
 }
 
-func (k *KubeManager) ensureProxyConfig(ctx context.Context, namespace, repoID string, policy *proxy.Policy) error {
+func (k *KubeManager) ensureProxyConfig(ctx context.Context, namespace, repoID string, policy *proxy.Policy) (string, error) {
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      proxyConfigMapName,
@@ -99,27 +103,33 @@ func (k *KubeManager) ensureProxyConfig(ctx context.Context, namespace, repoID s
 			"tinyproxy.conf": tinyproxyConfig(),
 		},
 	}
+	checksum := proxyConfigDataChecksum(configMap.Data)
 
 	_, err := k.client.CoreV1().ConfigMaps(namespace).Create(ctx, configMap, metav1.CreateOptions{})
 	if err == nil {
-		return nil
+		return checksum, nil
 	}
 	if !k8serrors.IsAlreadyExists(err) {
-		return fmt.Errorf("creating proxy configmap: %w", err)
+		return "", fmt.Errorf("creating proxy configmap: %w", err)
 	}
 
 	current, err := k.client.CoreV1().ConfigMaps(namespace).Get(ctx, proxyConfigMapName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("getting proxy configmap: %w", err)
+		return "", fmt.Errorf("getting proxy configmap: %w", err)
 	}
 
 	current.Data = configMap.Data
 	current.Labels = configMap.Labels
 	if _, err := k.client.CoreV1().ConfigMaps(namespace).Update(ctx, current, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("updating proxy configmap: %w", err)
+		return "", fmt.Errorf("updating proxy configmap: %w", err)
 	}
 
-	return nil
+	return checksum, nil
+}
+
+func proxyConfigDataChecksum(data map[string]string) string {
+	sum := sha256.Sum256([]byte(data["allowlist"] + "\n---\n" + data["tinyproxy.conf"]))
+	return hex.EncodeToString(sum[:])
 }
 
 func tinyproxyConfig() string {
@@ -155,7 +165,7 @@ func proxyAllowlist(destinations []string) string {
 	return strings.Join(patterns, "\n")
 }
 
-func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repoID string) error {
+func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repoID, checksum string) error {
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      proxyDeploymentName,
@@ -177,6 +187,9 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 					Labels: map[string]string{
 						"app.kubernetes.io/name": "kagen-proxy",
 						"kagen.io/repo-id":       repoID,
+					},
+					Annotations: map[string]string{
+						proxyConfigChecksum: checksum,
 					},
 				},
 				Spec: corev1.PodSpec{
@@ -244,6 +257,7 @@ exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`,
 
 	current.Labels = deployment.Labels
 	current.Spec.Template.Labels = deployment.Spec.Template.Labels
+	current.Spec.Template.Annotations = deployment.Spec.Template.Annotations
 	current.Spec.Template.Spec = deployment.Spec.Template.Spec
 	if _, err := k.client.AppsV1().Deployments(namespace).Update(ctx, current, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("updating proxy deployment: %w", err)

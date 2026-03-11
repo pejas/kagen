@@ -19,7 +19,9 @@ var requiredHosts = hostCatalogue{
 		"codex": {
 			"api.openai.com",
 		},
-		"opencode": nil,
+		"opencode": {
+			"opencode.ai",
+		},
 	},
 	ProviderHosts: map[string][]string{
 		"anthropic": {

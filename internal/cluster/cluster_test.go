@@ -10,6 +10,7 @@ import (
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestStubManagerEnsureNamespace(t *testing.T) {
@@ -169,5 +170,46 @@ func TestProxyAllowlistUsesEscapedHostPatterns(t *testing.T) {
 	}
 	if !strings.Contains(got, "api\\.openai\\.com") {
 		t.Fatalf("proxyAllowlist() missing trimmed OpenAI host: %q", got)
+	}
+}
+
+func TestProxyConfigDataChecksumChangesWithAllowlist(t *testing.T) {
+	t.Parallel()
+
+	first := proxyConfigDataChecksum(map[string]string{
+		"allowlist":      proxyAllowlist([]string{"api.openai.com"}),
+		"tinyproxy.conf": tinyproxyConfig(),
+	})
+	second := proxyConfigDataChecksum(map[string]string{
+		"allowlist":      proxyAllowlist([]string{"api.openai.com", "opencode.ai"}),
+		"tinyproxy.conf": tinyproxyConfig(),
+	})
+
+	if first == "" || second == "" {
+		t.Fatal("proxyConfigDataChecksum() returned empty checksum")
+	}
+	if first == second {
+		t.Fatalf("proxyConfigDataChecksum() should change when allowlist changes: %q", first)
+	}
+}
+
+func TestEnsureProxyDeploymentAnnotatesConfigChecksum(t *testing.T) {
+	t.Parallel()
+
+	checksum := proxyConfigDataChecksum(map[string]string{
+		"allowlist":      proxyAllowlist([]string{"opencode.ai"}),
+		"tinyproxy.conf": tinyproxyConfig(),
+	})
+
+	deployment := &corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				proxyConfigChecksum: checksum,
+			},
+		},
+	}
+
+	if got := deployment.Annotations[proxyConfigChecksum]; got != checksum {
+		t.Fatalf("proxy config checksum annotation = %q, want %q", got, checksum)
 	}
 }
