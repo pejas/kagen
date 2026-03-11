@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -105,34 +106,28 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("loading configuration: %w", err)
 	}
 
-	// 3. Resolve the agent type.
-	agentType, err := resolveAgent(cfg)
+	// 4. Ensure local runtime is healthy.
+	ui.Info("Ensuring local runtime is healthy...")
+	rtm := runtime.NewColimaManager(cfg.Runtime)
+	if err := rtm.EnsureRunning(ctx); err != nil {
+		return fmt.Errorf("runtime not available: %w", err)
+	}
+	kubeCtx := rtm.KubeContext()
+
+	// 5. Resolve the agent type.
+	agentType, err := resolveAgent(repo, kubeCtx, cfg)
 	if err != nil {
 		return err
 	}
 	ui.Info("Agent: %s", agentType)
 
-	// 4. Ensure local runtime is healthy.
-	ui.Info("Ensuring local runtime is healthy...")
-	rtm := runtime.NewColimaManager(cfg.Runtime)
-	if err := rtm.EnsureRunning(ctx); err != nil {
-		if errors.Is(err, kagerr.ErrNotImplemented) {
-			ui.Warn("Runtime management not yet implemented — skipping")
-		} else {
-			return fmt.Errorf("ensuring runtime: %w", err)
-		}
-	}
-
-	// 5. Ensure cluster resources.
-	ui.Info("Ensuring cluster resources...")
-	kubeCtx := rtm.KubeContext()
 	cm, err := cluster.NewKubeManager(kubeCtx)
 	if err != nil {
-		return fmt.Errorf("initializing cluster manager: %w", err)
+		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
 	}
 
-	// 5.1 Parse Devfile for resource generation
-	devfilePath := "devfile.yaml" // TODO: make configurable
+	// 5.1 Parse Devfile for resource generation.
+	devfilePath := "devfile.yaml"
 	d, err := devfile.Parse(devfilePath)
 	if err != nil {
 		return fmt.Errorf("parsing devfile: %w", err)
@@ -169,16 +164,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	// 8. Launch and attach agent.
 	ui.Info("Launching agent %s...", agentType)
-	registry := agent.NewRegistry()
+	registry := agent.NewRegistry(repo, kubeCtx)
 	a, err := registry.Get(agentType)
 	if err != nil {
 		return err
 	}
 	if err := a.Launch(ctx); err != nil {
-		if errors.Is(err, kagerr.ErrNotImplemented) {
-			ui.Warn("Agent launch not yet implemented — session setup complete")
-			return nil
-		}
 		return fmt.Errorf("launching agent: %w", err)
 	}
 
@@ -187,7 +178,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 // resolveAgent determines which agent to use from the flag, config, or
 // interactive prompt.
-func resolveAgent(cfg *config.Config) (agent.Type, error) {
+func resolveAgent(repo *git.Repository, kubeCtx string, cfg *config.Config) (agent.Type, error) {
 	// CLI flag takes precedence.
 	source := agentFlag
 	if source == "" {
@@ -199,7 +190,7 @@ func resolveAgent(cfg *config.Config) (agent.Type, error) {
 	}
 
 	// Interactive prompt.
-	registry := agent.NewRegistry()
+	registry := agent.NewRegistry(repo, kubeCtx)
 	names := registry.AvailableNames()
 	selected, err := ui.Prompt("Select an agent:", names)
 	if err != nil {
@@ -208,8 +199,7 @@ func resolveAgent(cfg *config.Config) (agent.Type, error) {
 
 	// Map display name back to type.
 	for _, t := range registry.Available() {
-		a, _ := registry.Get(t)
-		if a.Name() == selected {
+		if string(t) == strings.ToLower(selected) {
 			return t, nil
 		}
 	}

@@ -1,0 +1,17 @@
+schemaVersion: 2.2.0
+metadata:
+  name: kagen-workspace
+  version: 1.0.0
+components:
+  - name: agent
+    container:
+      image: node:20-slim
+      command: ["tail", "-f", "/dev/null"]
+      env:
+        - name: PROMPT_COMMAND
+          value: "history -a; history -c; history -r"
+      volumeMounts:
+        - name: agent-auth
+          path: /home/node/.claude
+        - name: projects
+          path: /projects

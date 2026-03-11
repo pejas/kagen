@@ -10,7 +10,7 @@ import (
 func TestRegistryGetKnownTypes(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := NewRegistry(nil, "")
 	for _, tt := range []Type{Claude, Codex, OpenCode} {
 		a, err := reg.Get(tt)
 		if err != nil {
@@ -26,7 +26,7 @@ func TestRegistryGetKnownTypes(t *testing.T) {
 func TestRegistryGetUnknownType(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := NewRegistry(nil, "")
 	_, err := reg.Get(Type("unknown"))
 	if !errors.Is(err, kagerr.ErrAgentUnknown) {
 		t.Errorf("expected ErrAgentUnknown, got %v", err)
@@ -36,7 +36,7 @@ func TestRegistryGetUnknownType(t *testing.T) {
 func TestRegistryAvailable(t *testing.T) {
 	t.Parallel()
 
-	reg := NewRegistry()
+	reg := NewRegistry(nil, "")
 	available := reg.Available()
 	if len(available) != 3 {
 		t.Fatalf("expected 3 available agents, got %d", len(available))
