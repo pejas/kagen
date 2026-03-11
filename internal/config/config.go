@@ -14,6 +14,9 @@ type Config struct {
 	// Agent is the default agent type (claude, codex, opencode).
 	Agent string `mapstructure:"agent"`
 
+	// AgentProviders declares the upstream API providers required per agent.
+	AgentProviders map[string][]string `mapstructure:"agent_providers"`
+
 	// ProxyAllowlist is the list of allowed egress destinations.
 	ProxyAllowlist []string `mapstructure:"proxy_allowlist"`
 
@@ -42,6 +45,7 @@ type RuntimeConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Agent:           "",
+		AgentProviders:  map[string][]string{},
 		ProxyAllowlist:  nil,
 		ForgejoHTTPPort: 3000,
 		ForgejoSSHPort:  2222,
@@ -53,6 +57,15 @@ func DefaultConfig() *Config {
 			StartupTimeout: "5m",
 		},
 	}
+}
+
+// ProvidersForAgent returns the configured providers for the given agent.
+func (c *Config) ProvidersForAgent(agent string) []string {
+	if c == nil || c.AgentProviders == nil {
+		return nil
+	}
+
+	return c.AgentProviders[agent]
 }
 
 // Load reads configuration from:
@@ -105,6 +118,7 @@ func Load() (*Config, error) {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent", "")
+	v.SetDefault("agent_providers", map[string][]string{})
 	v.SetDefault("proxy_allowlist", []string{})
 	v.SetDefault("forgejo_http_port", 3000)
 	v.SetDefault("forgejo_ssh_port", 2222)

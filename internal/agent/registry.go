@@ -11,6 +11,8 @@ import (
 type Registry struct {
 	repo    *git.Repository
 	kubeCtx string
+
+	containerName string
 }
 
 // NewRegistry creates a Registry for the given context.
@@ -21,15 +23,23 @@ func NewRegistry(repo *git.Repository, kubeCtx string) *Registry {
 	}
 }
 
+// WithContainer returns a copy of the registry that targets the given
+// container for attach and readiness checks.
+func (r *Registry) WithContainer(name string) *Registry {
+	clone := *r
+	clone.containerName = name
+	return &clone
+}
+
 // Get returns the agent for the given type, or ErrAgentUnknown if not found.
 func (r *Registry) Get(agentType Type) (Agent, error) {
 	switch agentType {
 	case Claude:
-		return NewClaudeAgent(r.repo, r.kubeCtx), nil
+		return NewClaudeAgent(r.repo, r.kubeCtx, r.containerName), nil
 	case Codex:
-		return NewCodexAgent(r.repo, r.kubeCtx), nil
+		return NewCodexAgent(r.repo, r.kubeCtx, r.containerName), nil
 	case OpenCode:
-		return NewOpenCodeAgent(r.repo, r.kubeCtx), nil
+		return NewOpenCodeAgent(r.repo, r.kubeCtx, r.containerName), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", kagerr.ErrAgentUnknown, agentType)
 	}
@@ -37,12 +47,12 @@ func (r *Registry) Get(agentType Type) (Agent, error) {
 
 // Available returns a sorted list of all registered agent types.
 func (r *Registry) Available() []Type {
-	return []Type{Claude, Codex, OpenCode}
+	return SupportedTypes()
 }
 
 // AvailableNames returns a list of display names for prompt selection.
 func (r *Registry) AvailableNames() []string {
-	return []string{"Claude", "Codex", "OpenCode"}
+	return SupportedNames()
 }
 
 // TypeFromString converts a string to a Type, returning ErrAgentUnknown if invalid.

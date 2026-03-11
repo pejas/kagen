@@ -23,9 +23,9 @@ type Policy struct {
 // LoadPolicy creates a Policy from the kagen configuration.
 // The policy is initially loaded as unenforced; the cluster layer
 // is responsible for marking it as enforced once the proxy pod is ready.
-func LoadPolicy(cfg *config.Config) *Policy {
+func LoadPolicy(cfg *config.Config, agentType string) *Policy {
 	return &Policy{
-		AllowedDestinations: cfg.ProxyAllowlist,
+		AllowedDestinations: composedHosts(agentType, cfg.ProvidersForAgent(agentType), cfg.ProxyAllowlist),
 		Enforced:            false,
 	}
 }

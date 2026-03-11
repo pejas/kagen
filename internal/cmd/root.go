@@ -19,6 +19,7 @@ import (
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/provenance"
+	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/runtime"
 	"github.com/pejas/kagen/internal/ui"
 )
@@ -101,8 +102,8 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	ui.Info("Repository: %s (branch: %s)", repo.Path, repo.CurrentBranch)
 
 	// 2. Validate environment (pre-flight).
-	devfilePath := "devfile.yaml"
-	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
+	devfilePath, err := devfile.FindPath(cwd)
+	if err != nil {
 		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
 	}
 
@@ -126,6 +127,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	ui.Info("Agent: %s", agentType)
+	policy := proxy.LoadPolicy(cfg, string(agentType))
+	if verboseFlag && len(policy.AllowedDestinations) > 0 {
+		ui.Info("Required egress hosts: %s", strings.Join(policy.AllowedDestinations, ", "))
+	}
 
 	// 6. Ensure cluster resources.
 	ui.Info("Ensuring cluster resources for %s/%s...", agentType, repo.CurrentBranch)
@@ -139,8 +144,13 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("parsing devfile: %w", err)
 	}
-	if !d.SupportsAgent(agentType) {
-		return fmt.Errorf("devfile.yaml does not declare a %s runtime: run 'kagen init --agent %s --force' or update the agent component attributes", agentType, agentType)
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return err
+	}
+	containerName, err := devfile.EnsureRuntimeComponent(d, spec)
+	if err != nil {
+		return fmt.Errorf("ensuring runtime component: %w", err)
 	}
 
 	if err := cm.EnsureNamespace(ctx, repo); err != nil {
@@ -174,7 +184,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	// 9. Launch and attach agent.
 	ui.Info("Launching agent %s...", agentType)
-	registry := agent.NewRegistry(repo, kubeCtx)
+	registry := agent.NewRegistry(repo, kubeCtx).WithContainer(containerName)
 	a, err := registry.Get(agentType)
 	if err != nil {
 		return err

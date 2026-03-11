@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pejas/kagen/internal/agent"
 )
 
 func TestGenerator_GeneratePod(t *testing.T) {
@@ -106,5 +108,46 @@ components:
 	_, err = g.GeneratePod("test-pod", devfileData)
 	if err == nil {
 		t.Error("GeneratePod() expected error for devfile with no containers")
+	}
+}
+
+func TestEnsureRuntimeComponentInjectsAgentContainer(t *testing.T) {
+	t.Parallel()
+
+	d := &Devfile{
+		SchemaVersion: "2.2.0",
+		Metadata:      Metadata{Name: "test"},
+		Components: []Component{
+			{
+				Name: "workspace",
+				Container: &Container{
+					Image: "vxcontrol/codebase:latest",
+				},
+			},
+		},
+	}
+
+	spec, err := agent.SpecFor(agent.OpenCode)
+	if err != nil {
+		t.Fatalf("SpecFor(opencode) error = %v", err)
+	}
+
+	containerName, err := EnsureRuntimeComponent(d, spec)
+	if err != nil {
+		t.Fatalf("EnsureRuntimeComponent(opencode) error = %v", err)
+	}
+	if containerName != "kagen-agent-opencode" {
+		t.Fatalf("EnsureRuntimeComponent(opencode) container = %q, want %q", containerName, "kagen-agent-opencode")
+	}
+
+	runtimeComponent := d.FindRuntimeComponent(agent.OpenCode)
+	if runtimeComponent == nil {
+		t.Fatal("FindRuntimeComponent(opencode) = nil, want injected component")
+	}
+	if runtimeComponent.Container == nil {
+		t.Fatal("runtime component container = nil, want container")
+	}
+	if runtimeComponent.Container.Image != "vxcontrol/codebase:latest" {
+		t.Fatalf("runtime component image = %q, want %q", runtimeComponent.Container.Image, "vxcontrol/codebase:latest")
 	}
 }

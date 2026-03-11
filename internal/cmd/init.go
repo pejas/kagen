@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,11 +19,13 @@ const defaultKagenConfigTemplate = `# kagen project configuration
 
 agent: %s
 
-# Additional egress destinations beyond agent API defaults.
+# Additional egress destinations beyond required runtime and provider hosts.
+# agent_providers:
+#   opencode:
+#     - anthropic
 # proxy_allowlist:
-#   - api.openai.com
-#   - chatgpt.com
 #   - registry.npmjs.org
+#   - github.com
 `
 
 var (
@@ -57,6 +60,11 @@ func runInit(_ *cobra.Command, _ []string) error {
 	}
 
 	devfilePath := filepath.Join(cwd, "devfile.yaml")
+	if existingPath, err := devfile.FindPath(cwd); err == nil {
+		devfilePath = existingPath
+	} else if !errors.Is(err, devfile.ErrDevfileNotFound()) {
+		return err
+	}
 	configPath := filepath.Join(cwd, ".kagen.yaml")
 	created := false
 

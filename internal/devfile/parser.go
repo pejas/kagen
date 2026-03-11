@@ -69,11 +69,5 @@ func Parse(path string) (*Devfile, error) {
 // SupportsAgent reports whether the devfile declares a runtime for the
 // requested agent.
 func (d *Devfile) SupportsAgent(agentType agent.Type) bool {
-	for _, component := range d.Components {
-		if component.Attributes["kagen.agent/runtime"] == string(agentType) {
-			return true
-		}
-	}
-
-	return false
+	return d.FindRuntimeComponent(agentType) != nil
 }

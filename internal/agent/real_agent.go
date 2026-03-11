@@ -12,10 +12,12 @@ import (
 
 // BaseAgent provides shared functionality for agent implementations.
 type BaseAgent struct {
-	agentType Type
-	name      string
-	repo      *git.Repository
-	kubeCtx   string
+	agentType     Type
+	name          string
+	repo          *git.Repository
+	kubeCtx       string
+	containerName string
+	spec          RuntimeSpec
 }
 
 func (b *BaseAgent) Name() string    { return b.name }
@@ -44,10 +46,8 @@ func (b *BaseAgent) Launch(ctx context.Context) error {
 		return fmt.Errorf("waiting for agent pod readiness: %s: %w", string(out), err)
 	}
 
-	if b.agentType == Codex {
-		if err := b.waitForCodex(ctx, ns); err != nil {
-			return err
-		}
+	if err := b.waitForRuntime(ctx, ns); err != nil {
+		return err
 	}
 
 	return nil
@@ -72,6 +72,16 @@ func (b *BaseAgent) Attach(ctx context.Context) error {
 		podName,
 		"--",
 	}
+	if b.containerName != "" {
+		args = []string{
+			"--context", b.kubeCtx,
+			"exec", "-it",
+			"-n", ns,
+			podName,
+			"-c", b.containerName,
+			"--",
+		}
+	}
 	args = append(args, b.commandArgs()...)
 
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -83,34 +93,21 @@ func (b *BaseAgent) Attach(ctx context.Context) error {
 }
 
 func (b *BaseAgent) commandArgs() []string {
-	switch b.agentType {
-	case Claude:
-		return []string{"claude-code"}
-	case Codex:
-		return []string{
-			"codex",
-			"-C", "/projects/workspace",
-			"--sandbox", "danger-full-access",
-			"-a", "never",
-		}
-	case OpenCode:
-		return []string{"opencode"}
-	default:
-		return []string{"/bin/sh"}
-	}
+	return []string{"/bin/sh", "-lc", b.spec.AttachShell}
 }
 
-func (b *BaseAgent) waitForCodex(ctx context.Context, namespace string) error {
+func (b *BaseAgent) waitForRuntime(ctx context.Context, namespace string) error {
 	for i := 0; i < 90; i++ {
 		args := []string{
 			"--context", b.kubeCtx,
 			"exec",
 			"-n", namespace,
 			"agent",
-			"--",
-			"/bin/sh", "-lc",
-			"test -d /projects/workspace/.git && command -v codex >/dev/null 2>&1",
 		}
+		if b.containerName != "" {
+			args = append(args, "-c", b.containerName)
+		}
+		args = append(args, "--", "/bin/sh", "-lc", b.spec.ReadyCheck())
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		if err := cmd.Run(); err == nil {
 			return nil
@@ -123,35 +120,44 @@ func (b *BaseAgent) waitForCodex(ctx context.Context, namespace string) error {
 		}
 	}
 
-	return fmt.Errorf("timed out waiting for Codex runtime bootstrap in pod %s/agent", namespace)
+	return fmt.Errorf("timed out waiting for %s runtime bootstrap in pod %s/agent", b.name, namespace)
 }
 
 // NewClaudeAgent returns a real Claude agent.
-func NewClaudeAgent(repo *git.Repository, kubeCtx string) Agent {
+func NewClaudeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+	spec, _ := SpecFor(Claude)
 	return &BaseAgent{
-		agentType: Claude,
-		name:      "Claude",
-		repo:      repo,
-		kubeCtx:   kubeCtx,
+		agentType:     Claude,
+		name:          "Claude",
+		repo:          repo,
+		kubeCtx:       kubeCtx,
+		containerName: containerName,
+		spec:          spec,
 	}
 }
 
 // NewCodexAgent returns a real Codex agent.
-func NewCodexAgent(repo *git.Repository, kubeCtx string) Agent {
+func NewCodexAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+	spec, _ := SpecFor(Codex)
 	return &BaseAgent{
-		agentType: Codex,
-		name:      "Codex",
-		repo:      repo,
-		kubeCtx:   kubeCtx,
+		agentType:     Codex,
+		name:          "Codex",
+		repo:          repo,
+		kubeCtx:       kubeCtx,
+		containerName: containerName,
+		spec:          spec,
 	}
 }
 
 // NewOpenCodeAgent returns a real OpenCode agent.
-func NewOpenCodeAgent(repo *git.Repository, kubeCtx string) Agent {
+func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+	spec, _ := SpecFor(OpenCode)
 	return &BaseAgent{
-		agentType: OpenCode,
-		name:      "OpenCode",
-		repo:      repo,
-		kubeCtx:   kubeCtx,
+		agentType:     OpenCode,
+		name:          "OpenCode",
+		repo:          repo,
+		kubeCtx:       kubeCtx,
+		containerName: containerName,
+		spec:          spec,
 	}
 }

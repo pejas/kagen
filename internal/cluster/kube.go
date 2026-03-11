@@ -65,7 +65,7 @@ func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository)
 }
 
 // EnsureResources orchestrates the PVCs and Pod for the repository.
-func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType agent.Type, d *devfile.Devfile) error {
+func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, _ agent.Type, d *devfile.Devfile) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 
 	// 1. Generate Pod spec.
@@ -76,7 +76,6 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 	}
 	pod.Labels["kagen.io/repo-id"] = repo.ID()
 	injectWorkspaceSync(pod, repo)
-	injectAgentRuntime(pod, agentType)
 
 	// 2. Ensure PVCs (Stage 3 focuses on simple PVC existence).
 	// For this stage, we assume PVCs mentioned in devfile volumes are handled or we create simple ones.
@@ -119,21 +118,6 @@ git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
 			},
 		},
 	})
-}
-
-func injectAgentRuntime(pod *corev1.Pod, agentType agent.Type) {
-	if len(pod.Spec.Containers) == 0 {
-		return
-	}
-
-	switch agentType {
-	case agent.Codex:
-		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env,
-			corev1.EnvVar{Name: "HOME", Value: "/home/kagen"},
-			corev1.EnvVar{Name: "CODEX_HOME", Value: "/home/kagen/.codex"},
-		)
-	default:
-	}
 }
 
 // AttachAgent connects the current terminal to the agent process.
