@@ -12,12 +12,26 @@ func TestLoadPolicyFromConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		ProxyAllowlist: []string{"api.anthropic.com", "api.openai.com"},
+		AgentProviders: map[string][]string{
+			"opencode": {"anthropic"},
+		},
+		ProxyAllowlist: []string{"github.com"},
 	}
 
-	policy := LoadPolicy(cfg)
-	if len(policy.AllowedDestinations) != 2 {
-		t.Errorf("expected 2 allowed destinations, got %d", len(policy.AllowedDestinations))
+	policy := LoadPolicy(cfg, "opencode")
+	if len(policy.AllowedDestinations) != 3 {
+		t.Errorf("expected 3 allowed destinations, got %d", len(policy.AllowedDestinations))
+	}
+	want := map[string]bool{
+		"api.anthropic.com":  true,
+		"github.com":         true,
+		"registry.npmjs.org": true,
+	}
+	for _, host := range policy.AllowedDestinations {
+		delete(want, host)
+	}
+	if len(want) != 0 {
+		t.Errorf("LoadPolicy(opencode) missing hosts: %v", want)
 	}
 	if policy.Enforced {
 		t.Error("expected policy to be unenforced initially")
@@ -64,5 +78,17 @@ func TestEmptyAllowlistDeniesAll(t *testing.T) {
 	policy := &Policy{AllowedDestinations: nil}
 	if policy.AllowsDestination("anything.com") {
 		t.Error("expected empty allowlist to deny all destinations")
+	}
+}
+
+func TestLoadPolicyCodexIncludesRequiredHosts(t *testing.T) {
+	t.Parallel()
+
+	policy := LoadPolicy(&config.Config{}, "codex")
+	if !policy.AllowsDestination("api.openai.com") {
+		t.Error("LoadPolicy(codex) should allow api.openai.com")
+	}
+	if !policy.AllowsDestination("registry.npmjs.org") {
+		t.Error("LoadPolicy(codex) should allow registry.npmjs.org")
 	}
 }

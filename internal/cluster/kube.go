@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/devfile"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
@@ -136,26 +137,27 @@ git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
 }
 
 func injectAgentRuntime(pod *corev1.Pod, agentType, namespace string, policy *proxy.Policy) {
-	if len(pod.Spec.Containers) == 0 {
+	if len(pod.Spec.Containers) == 0 || agentType == "" {
 		return
 	}
 
-	if proxyEnabled(policy) {
-		injectProxyEnv(&pod.Spec.Containers[0], namespace)
+	spec, err := agent.SpecFor(agent.Type(agentType))
+	if err != nil {
+		return
 	}
 
-	switch agentType {
-	case "codex":
-		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env,
-			corev1.EnvVar{Name: "HOME", Value: "/home/kagen"},
-			corev1.EnvVar{Name: "CODEX_HOME", Value: "/home/kagen/.codex"},
-		)
-	default:
+	container := runtimeContainer(pod, spec.ContainerName())
+	if container == nil {
+		container = &pod.Spec.Containers[0]
 	}
-}
 
-func proxyEnabled(policy *proxy.Policy) bool {
-	return policy != nil && len(policy.AllowedDestinations) > 0
+	for _, variable := range spec.RequiredEnv {
+		setContainerEnv(container, variable.Name, variable.Value)
+	}
+
+	if policyEnabled(policy) {
+		injectProxyEnv(container, namespace)
+	}
 }
 
 func injectProxyEnv(container *corev1.Container, namespace string) {
@@ -180,6 +182,31 @@ func injectProxyEnv(container *corev1.Container, namespace string) {
 		corev1.EnvVar{Name: "NO_PROXY", Value: noProxy},
 		corev1.EnvVar{Name: "no_proxy", Value: noProxy},
 	)
+}
+
+func runtimeContainer(pod *corev1.Pod, name string) *corev1.Container {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return &pod.Spec.Containers[i]
+		}
+	}
+
+	return nil
+}
+
+func setContainerEnv(container *corev1.Container, name, value string) {
+	for i := range container.Env {
+		if container.Env[i].Name == name {
+			container.Env[i].Value = value
+			return
+		}
+	}
+
+	container.Env = append(container.Env, corev1.EnvVar{Name: name, Value: value})
+}
+
+func policyEnabled(policy *proxy.Policy) bool {
+	return policy != nil && len(policy.AllowedDestinations) > 0
 }
 
 // AttachAgent connects the current terminal to the agent process.

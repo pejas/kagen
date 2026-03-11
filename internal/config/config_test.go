@@ -52,7 +52,7 @@ func TestLoadFromConfigFile(t *testing.T) {
 		t.Fatalf("failed to create config dir: %v", err)
 	}
 
-	configContent := []byte("agent: opencode\nforgejo_http_port: 4000\n")
+	configContent := []byte("agent: opencode\nforgejo_http_port: 4000\nagent_providers:\n  opencode:\n    - anthropic\n")
 	if err := os.WriteFile(filepath.Join(configDir, "main.yml"), configContent, 0o644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
@@ -69,6 +69,9 @@ func TestLoadFromConfigFile(t *testing.T) {
 	}
 	if cfg.ForgejoHTTPPort != 4000 {
 		t.Errorf("expected ForgejoHTTPPort=4000 from file, got %d", cfg.ForgejoHTTPPort)
+	}
+	if got := cfg.ProvidersForAgent("opencode"); len(got) != 1 || got[0] != "anthropic" {
+		t.Errorf("ProvidersForAgent(opencode) = %v, want [anthropic]", got)
 	}
 }
 

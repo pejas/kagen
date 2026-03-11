@@ -47,3 +47,21 @@ func TestParse_NotFound(t *testing.T) {
 		t.Error("Parse() expected error for non-existent file, got nil")
 	}
 }
+
+func TestFindPath(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "devfile.yml")
+	if err := os.WriteFile(path, []byte("schemaVersion: 2.2.0\nmetadata:\n  name: test\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+
+	got, err := FindPath(tmpDir)
+	if err != nil {
+		t.Fatalf("FindPath(%q) error = %v", tmpDir, err)
+	}
+	if got != path {
+		t.Errorf("FindPath(%q) = %q, want %q", tmpDir, got, path)
+	}
+}

@@ -248,6 +248,14 @@ func TestFeatures(t *testing.T) {
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		t.Skip("skipping e2e tests: kubectl not found in PATH")
 	}
+	if _, err := exec.LookPath("colima"); err != nil {
+		t.Skip("skipping e2e: colima not found in PATH")
+	}
+	wd, _ := os.Getwd()
+	binPath := filepath.Join(wd, "..", "..", "bin", "kagen")
+	if _, err := os.Stat(binPath); err != nil {
+		t.Skip("skipping e2e: bin/kagen not built")
+	}
 
 	if err := cleanupE2ENamespaces(); err != nil {
 		t.Fatalf("cleaning e2e namespaces before test run: %v", err)

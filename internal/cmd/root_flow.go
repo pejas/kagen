@@ -66,8 +66,12 @@ func loadProjectDevfile(agentType agent.Type) (*devfile.Devfile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing devfile: %w", err)
 	}
-	if !d.SupportsAgent(agentType) {
-		return nil, fmt.Errorf("devfile.yaml does not declare a %s runtime: run 'kagen init --agent %s --force' or update the agent component attributes", agentType, agentType)
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := devfile.EnsureRuntimeComponent(d, spec); err != nil {
+		return nil, fmt.Errorf("ensuring runtime component: %w", err)
 	}
 
 	return d, nil
@@ -135,7 +139,7 @@ func ensureClusterResources(
 	if err := manager.EnsureNamespace(ctx, repo); err != nil {
 		return fmt.Errorf("ensuring namespace: %w", err)
 	}
-	policy := proxy.LoadPolicy(cfg)
+	policy := proxy.LoadPolicy(cfg, string(agentType))
 	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
 		return fmt.Errorf("ensuring proxy: %w", err)
 	}
@@ -146,8 +150,8 @@ func ensureClusterResources(
 	return nil
 }
 
-func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Repository, cfg *config.Config) error {
-	policy := proxy.LoadPolicy(cfg)
+func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Repository, cfg *config.Config, agentType agent.Type) error {
+	policy := proxy.LoadPolicy(cfg, string(agentType))
 	if len(policy.AllowedDestinations) == 0 {
 		return nil
 	}
@@ -169,8 +173,13 @@ func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Reposito
 }
 
 func launchAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type) error {
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return err
+	}
+
 	ui.Info("Launching agent %s...", agentType)
-	registry := agent.NewRegistry(repo, kubeCtx)
+	registry := agent.NewRegistry(repo, kubeCtx).WithContainer(spec.ContainerName())
 	a, err := registry.Get(agentType)
 	if err != nil {
 		return err

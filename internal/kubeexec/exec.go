@@ -9,9 +9,23 @@ import (
 
 // Runner manages remote command execution in cluster pods.
 type Runner interface {
-	Run(ctx context.Context, namespace, pod string, command []string) (string, error)
-	Attach(ctx context.Context, namespace, pod string, command []string) error
+	Run(ctx context.Context, namespace, pod string, command []string, opts ...Option) (string, error)
+	Attach(ctx context.Context, namespace, pod string, command []string, opts ...Option) error
 	WaitForPodReady(ctx context.Context, namespace, pod, timeout string) error
+}
+
+// Option mutates a kubectl exec invocation.
+type Option func(*commandOptions)
+
+type commandOptions struct {
+	container string
+}
+
+// WithContainer targets a specific container within the pod.
+func WithContainer(name string) Option {
+	return func(opts *commandOptions) {
+		opts.container = name
+	}
 }
 
 // KubectlRunner implements Runner using kubectl exec.
@@ -25,12 +39,14 @@ func NewRunner(kubeCtx string) *KubectlRunner {
 }
 
 // Run executes a non-interactive command in a pod and returns combined output.
-func (r *KubectlRunner) Run(ctx context.Context, namespace, pod string, command []string) (string, error) {
+func (r *KubectlRunner) Run(ctx context.Context, namespace, pod string, command []string, opts ...Option) (string, error) {
 	args := []string{"exec"}
 	if r.kubeCtx != "" {
 		args = append(args, "--context", r.kubeCtx)
 	}
-	args = append(args, "-n", namespace, pod, "--")
+	args = append(args, "-n", namespace, pod)
+	args = appendExecOptions(args, opts...)
+	args = append(args, "--")
 	args = append(args, command...)
 
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -43,12 +59,14 @@ func (r *KubectlRunner) Run(ctx context.Context, namespace, pod string, command 
 }
 
 // Attach opens an interactive kubectl exec session in a pod.
-func (r *KubectlRunner) Attach(ctx context.Context, namespace, pod string, command []string) error {
+func (r *KubectlRunner) Attach(ctx context.Context, namespace, pod string, command []string, opts ...Option) error {
 	args := []string{"exec"}
 	if r.kubeCtx != "" {
 		args = append(args, "--context", r.kubeCtx)
 	}
-	args = append(args, "-it", "-n", namespace, pod, "--")
+	args = append(args, "-it", "-n", namespace, pod)
+	args = appendExecOptions(args, opts...)
+	args = append(args, "--")
 	args = append(args, command...)
 
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -61,6 +79,20 @@ func (r *KubectlRunner) Attach(ctx context.Context, namespace, pod string, comma
 	}
 
 	return nil
+}
+
+func appendExecOptions(args []string, opts ...Option) []string {
+	options := commandOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+	if options.container != "" {
+		args = append(args, "-c", options.container)
+	}
+
+	return args
 }
 
 // WaitForPodReady blocks until the target pod reports Ready.

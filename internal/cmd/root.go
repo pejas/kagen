@@ -14,6 +14,7 @@ import (
 	"github.com/pejas/kagen/internal/config"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/ui"
 )
 
@@ -100,6 +101,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	ui.Info("Agent: %s", agentType)
+	policy := proxy.LoadPolicy(cfg, string(agentType))
+	if verboseFlag && len(policy.AllowedDestinations) > 0 {
+		ui.Info("Required egress hosts: %s", strings.Join(policy.AllowedDestinations, ", "))
+	}
 
 	d, err := loadProjectDevfile(agentType)
 	if err != nil {
@@ -116,7 +121,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	if err := ensureForgejoImport(ctx, forgejoService, repo); err != nil {
 		return err
 	}
-	if err := validateProxyPolicy(ctx, kubeCtx, repo, cfg); err != nil {
+	if err := validateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType); err != nil {
 		return err
 	}
 

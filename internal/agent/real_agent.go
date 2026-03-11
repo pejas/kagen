@@ -12,11 +12,13 @@ import (
 
 // baseAgent provides shared functionality for agent implementations.
 type baseAgent struct {
-	agentType Type
-	name      string
-	repo      *git.Repository
-	kubeCtx   string
-	exec      kubeexec.Runner
+	agentType     Type
+	name          string
+	repo          *git.Repository
+	kubeCtx       string
+	containerName string
+	spec          RuntimeSpec
+	exec          kubeexec.Runner
 }
 
 func (b *baseAgent) Name() string    { return b.name }
@@ -35,10 +37,8 @@ func (b *baseAgent) Launch(ctx context.Context) error {
 		return fmt.Errorf("waiting for agent pod readiness: %w", err)
 	}
 
-	if b.agentType == Codex {
-		if err := b.waitForCodex(ctx, ns); err != nil {
-			return err
-		}
+	if err := b.waitForRuntime(ctx, ns); err != nil {
+		return err
 	}
 
 	return nil
@@ -59,34 +59,20 @@ func (b *baseAgent) Attach(ctx context.Context) error {
 	// In a real implementation, we'd look up the pod by labels.
 	podName := "agent" // Simplified for now, should be looked up
 
-	return b.exec.Attach(ctx, ns, podName, b.commandArgs())
+	return b.exec.Attach(ctx, ns, podName, b.commandArgs(), kubeexec.WithContainer(b.containerName))
 }
 
 func (b *baseAgent) commandArgs() []string {
-	switch b.agentType {
-	case Claude:
-		return []string{"claude-code"}
-	case Codex:
-		return []string{
-			"codex",
-			"-C", "/projects/workspace",
-			"--sandbox", "danger-full-access",
-			"-a", "never",
-		}
-	case OpenCode:
-		return []string{"opencode"}
-	default:
-		return []string{"/bin/sh"}
-	}
+	return []string{"/bin/sh", "-lc", b.spec.AttachShell}
 }
 
-func (b *baseAgent) waitForCodex(ctx context.Context, namespace string) error {
+func (b *baseAgent) waitForRuntime(ctx context.Context, namespace string) error {
 	for i := 0; i < 90; i++ {
 		command := []string{
 			"/bin/sh", "-lc",
-			"test -d /projects/workspace/.git && command -v codex >/dev/null 2>&1",
+			b.spec.ReadyCheck(),
 		}
-		if _, err := b.exec.Run(ctx, namespace, "agent", command); err == nil {
+		if _, err := b.exec.Run(ctx, namespace, "agent", command, kubeexec.WithContainer(b.containerName)); err == nil {
 			return nil
 		}
 
@@ -97,38 +83,47 @@ func (b *baseAgent) waitForCodex(ctx context.Context, namespace string) error {
 		}
 	}
 
-	return fmt.Errorf("timed out waiting for Codex runtime bootstrap in pod %s/agent", namespace)
+	return fmt.Errorf("timed out waiting for %s runtime bootstrap in pod %s/agent", b.name, namespace)
 }
 
 // NewClaudeAgent returns a real Claude agent.
-func NewClaudeAgent(repo *git.Repository, kubeCtx string) Agent {
+func NewClaudeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+	spec, _ := SpecFor(Claude)
 	return &baseAgent{
-		agentType: Claude,
-		name:      "Claude",
-		repo:      repo,
-		kubeCtx:   kubeCtx,
-		exec:      kubeexec.NewRunner(kubeCtx),
+		agentType:     Claude,
+		name:          "Claude",
+		repo:          repo,
+		kubeCtx:       kubeCtx,
+		containerName: containerName,
+		spec:          spec,
+		exec:          kubeexec.NewRunner(kubeCtx),
 	}
 }
 
 // NewCodexAgent returns a real Codex agent.
-func NewCodexAgent(repo *git.Repository, kubeCtx string) Agent {
+func NewCodexAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+	spec, _ := SpecFor(Codex)
 	return &baseAgent{
-		agentType: Codex,
-		name:      "Codex",
-		repo:      repo,
-		kubeCtx:   kubeCtx,
-		exec:      kubeexec.NewRunner(kubeCtx),
+		agentType:     Codex,
+		name:          "Codex",
+		repo:          repo,
+		kubeCtx:       kubeCtx,
+		containerName: containerName,
+		spec:          spec,
+		exec:          kubeexec.NewRunner(kubeCtx),
 	}
 }
 
 // NewOpenCodeAgent returns a real OpenCode agent.
-func NewOpenCodeAgent(repo *git.Repository, kubeCtx string) Agent {
+func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+	spec, _ := SpecFor(OpenCode)
 	return &baseAgent{
-		agentType: OpenCode,
-		name:      "OpenCode",
-		repo:      repo,
-		kubeCtx:   kubeCtx,
-		exec:      kubeexec.NewRunner(kubeCtx),
+		agentType:     OpenCode,
+		name:          "OpenCode",
+		repo:          repo,
+		kubeCtx:       kubeCtx,
+		containerName: containerName,
+		spec:          spec,
+		exec:          kubeexec.NewRunner(kubeCtx),
 	}
 }
