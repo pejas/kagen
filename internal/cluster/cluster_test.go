@@ -7,6 +7,7 @@ import (
 
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/proxy"
 )
 
 func TestStubManagerEnsureNamespace(t *testing.T) {
@@ -35,6 +36,28 @@ func TestStubManagerAttachAgent(t *testing.T) {
 	mgr := NewStubManager()
 	repo := &git.Repository{Path: "/fake"}
 	err := mgr.AttachAgent(context.Background(), repo)
+	if !errors.Is(err, kagerr.ErrNotImplemented) {
+		t.Errorf("expected ErrNotImplemented, got %v", err)
+	}
+}
+
+func TestStubManagerEnsureProxy(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewStubManager()
+	repo := &git.Repository{Path: "/fake"}
+	err := mgr.EnsureProxy(context.Background(), repo, &proxy.Policy{})
+	if !errors.Is(err, kagerr.ErrNotImplemented) {
+		t.Errorf("expected ErrNotImplemented, got %v", err)
+	}
+}
+
+func TestStubManagerProxyReady(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewStubManager()
+	repo := &git.Repository{Path: "/fake"}
+	_, err := mgr.ProxyReady(context.Background(), repo)
 	if !errors.Is(err, kagerr.ErrNotImplemented) {
 		t.Errorf("expected ErrNotImplemented, got %v", err)
 	}

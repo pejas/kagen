@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/pejas/kagen/internal/git"
@@ -32,18 +31,8 @@ func (b *baseAgent) Authenticate(ctx context.Context) error {
 // as the Pod generation already includes the container.
 func (b *baseAgent) Launch(ctx context.Context) error {
 	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
-
-	waitArgs := []string{
-		"--context", b.kubeCtx,
-		"wait",
-		"--for=condition=Ready",
-		"-n", ns,
-		"pod/agent",
-		"--timeout=5m",
-	}
-	waitCmd := exec.CommandContext(ctx, "kubectl", waitArgs...)
-	if out, err := waitCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("waiting for agent pod readiness: %s: %w", string(out), err)
+	if err := b.exec.WaitForPodReady(ctx, ns, "agent", "5m"); err != nil {
+		return fmt.Errorf("waiting for agent pod readiness: %w", err)
 	}
 
 	if b.agentType == Codex {

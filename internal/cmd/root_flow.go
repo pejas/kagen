@@ -115,6 +115,7 @@ func ensureClusterResources(
 	ctx context.Context,
 	kubeCtx string,
 	repo *git.Repository,
+	cfg *config.Config,
 	agentType agent.Type,
 	d *devfile.Devfile,
 ) error {
@@ -126,6 +127,10 @@ func ensureClusterResources(
 	if err := manager.EnsureNamespace(ctx, repo); err != nil {
 		return fmt.Errorf("ensuring namespace: %w", err)
 	}
+	policy := proxy.LoadPolicy(cfg)
+	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
+		return fmt.Errorf("ensuring proxy: %w", err)
+	}
 	if err := manager.EnsureResources(ctx, repo, string(agentType), d); err != nil {
 		return fmt.Errorf("ensuring resources: %w", err)
 	}
@@ -133,13 +138,21 @@ func ensureClusterResources(
 	return nil
 }
 
-func validateProxyPolicy(cfg *config.Config) error {
+func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Repository, cfg *config.Config) error {
 	policy := proxy.LoadPolicy(cfg)
 	if len(policy.AllowedDestinations) == 0 {
 		return nil
 	}
 
-	policy.Enforced = os.Getenv("KAGEN_PROXY_ENFORCED") == "true"
+	manager, err := cluster.NewKubeManager(kubeCtx)
+	if err != nil {
+		return fmt.Errorf("creating cluster manager for proxy validation: %w", err)
+	}
+
+	policy.Enforced, err = manager.ProxyReady(ctx, repo)
+	if err != nil {
+		return fmt.Errorf("checking proxy readiness: %w", err)
+	}
 	if err := policy.Validate(); err != nil {
 		return fmt.Errorf("validating proxy policy: %w", err)
 	}

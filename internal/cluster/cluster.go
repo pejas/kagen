@@ -8,6 +8,7 @@ import (
 	"github.com/pejas/kagen/internal/devfile"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/proxy"
 )
 
 // Manager defines the interface for cluster resource orchestration.
@@ -17,6 +18,12 @@ type Manager interface {
 
 	// EnsureResources orchestrates the PVCs, Pod, and other resources for the repository.
 	EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile) error
+
+	// EnsureProxy reconciles the namespace-scoped proxy resources for the repository.
+	EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy) error
+
+	// ProxyReady reports whether the namespace-scoped proxy is ready.
+	ProxyReady(ctx context.Context, repo *git.Repository) (bool, error)
 
 	// AttachAgent connects the current terminal to the agent process inside the Pod.
 	AttachAgent(ctx context.Context, repo *git.Repository) error
@@ -44,6 +51,14 @@ func (s *StubManager) EnsureNamespace(_ context.Context, _ *git.Repository) erro
 
 func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ string, _ *devfile.Devfile) error {
 	return fmt.Errorf("ensure resources: %w", kagerr.ErrNotImplemented)
+}
+
+func (s *StubManager) EnsureProxy(_ context.Context, _ *git.Repository, _ *proxy.Policy) error {
+	return fmt.Errorf("ensure proxy: %w", kagerr.ErrNotImplemented)
+}
+
+func (s *StubManager) ProxyReady(_ context.Context, _ *git.Repository) (bool, error) {
+	return false, fmt.Errorf("proxy ready: %w", kagerr.ErrNotImplemented)
 }
 
 func (s *StubManager) AttachAgent(_ context.Context, _ *git.Repository) error {
