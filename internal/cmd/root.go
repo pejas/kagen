@@ -100,7 +100,13 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 	ui.Info("Repository: %s (branch: %s)", repo.Path, repo.CurrentBranch)
 
-	// 2. Load configuration.
+	// 2. Validate environment (pre-flight).
+	devfilePath := "devfile.yaml"
+	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
+		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
+	}
+
+	// 3. Load configuration.
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("loading configuration: %w", err)
@@ -121,17 +127,14 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}
 	ui.Info("Agent: %s", agentType)
 
+	// 6. Ensure cluster resources.
+	ui.Info("Ensuring cluster resources for %s/%s...", agentType, repo.CurrentBranch)
 	cm, err := cluster.NewKubeManager(kubeCtx)
 	if err != nil {
 		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
 	}
 
-	// 5.1 Parse Devfile for resource generation.
-	devfilePath := "devfile.yaml"
-	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
-		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
-	}
-
+	// 6.1 Parse Devfile for resource generation.
 	d, err := devfile.Parse(devfilePath)
 	if err != nil {
 		return fmt.Errorf("parsing devfile: %w", err)
@@ -145,11 +148,11 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("ensuring resources: %w", err)
 	}
 
-	// 6. Record import provenance.
+	// 7. Record import provenance.
 	rec := provenance.RecordImport(repo)
 	ui.Info("Import provenance: %s@%s (%s)", rec.SourceBranch, rec.SourceCommitSHA[:8], rec.ImportedAt.Format("2006-01-02T15:04:05Z"))
 
-	// 7. Import repository to Forgejo.
+	// 8. Import repository to Forgejo.
 	ui.Info("Importing repository to Forgejo...")
 	clientset, err := cluster.NewClientset(kubeCtx)
 	if err != nil {
@@ -166,7 +169,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("importing to forgejo: %w", err)
 	}
 
-	// 8. Launch and attach agent.
+	// 9. Launch and attach agent.
 	ui.Info("Launching agent %s...", agentType)
 	registry := agent.NewRegistry(repo, kubeCtx)
 	a, err := registry.Get(agentType)
