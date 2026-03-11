@@ -82,6 +82,15 @@ func TestKagenRemoteTrackingBranch(t *testing.T) {
 	}
 }
 
+func TestRemoteTrackingBranch(t *testing.T) {
+	t.Parallel()
+
+	repo := &Repository{CurrentBranch: "feature/x"}
+	if got := repo.RemoteTrackingBranch("kagen"); got != "kagen/feature/x" {
+		t.Errorf("expected kagen/feature/x, got %q", got)
+	}
+}
+
 func TestMergeFFOnly(t *testing.T) {
 	t.Parallel()
 
@@ -114,6 +123,37 @@ func TestMergeFFOnly(t *testing.T) {
 	}
 	if head != branchHead {
 		t.Fatalf("HEAD = %q, want %q", head, branchHead)
+	}
+}
+
+func TestPushRefspecs(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	remote := filepath.Join(t.TempDir(), "remote.git")
+
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "test@test.com")
+	runGit(t, dir, "config", "user.name", "Test")
+	runGit(t, dir, "commit", "--allow-empty", "-m", "init")
+
+	runGit(t, filepath.Dir(remote), "init", "--bare", remote)
+	runGit(t, dir, "remote", "add", "kagen", remote)
+
+	repo, err := Discover(dir)
+	if err != nil {
+		t.Fatalf("Discover() returned error: %v", err)
+	}
+
+	if err := repo.PushRefspecs(t.Context(), "kagen", "HEAD:main", "HEAD:"+repo.KagenBranch()); err != nil {
+		t.Fatalf("PushRefspecs() returned error: %v", err)
+	}
+
+	for _, ref := range []string{"main", repo.KagenBranch()} {
+		cmd := exec.Command("git", "--git-dir", remote, "rev-parse", ref)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git rev-parse %s failed: %v\n%s", ref, err, out)
+		}
 	}
 }
 

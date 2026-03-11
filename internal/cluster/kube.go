@@ -125,8 +125,8 @@ for _ in $(seq 1 90); do
 done
 git clone "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git" "$worktree"
 cd "$worktree"
-git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
-`, repo.CurrentBranch, repo.CurrentBranch, repo.KagenBranch())},
+git checkout %q 2>/dev/null || git checkout --track -b %q "origin/%s"
+`, repo.KagenBranch(), repo.KagenBranch(), repo.KagenBranch())},
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      "git-workspace",

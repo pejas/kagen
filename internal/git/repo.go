@@ -44,6 +44,12 @@ func (r *Repository) KagenRemoteTrackingBranch(remote string) string {
 	return remote + "/" + r.KagenBranch()
 }
 
+// RemoteTrackingBranch returns the local remote-tracking ref for the current
+// branch on the given remote.
+func (r *Repository) RemoteTrackingBranch(remote string) string {
+	return remote + "/" + r.CurrentBranch
+}
+
 // Discover walks up from startPath to find the root of a Git repository.
 // Returns ErrNotGitRepo if no repository is found.
 func Discover(startPath string) (*Repository, error) {
@@ -125,11 +131,40 @@ func (r *Repository) AddRemote(name, url string) error {
 
 // Push pushes the specified ref to the given remote.
 func (r *Repository) Push(ctx context.Context, remote, ref string) error {
-	_, err := gitCommand(r.Path, "push", "-f", remote, ref)
-	if err != nil {
-		return fmt.Errorf("git push %s %s: %w", remote, ref, err)
+	return r.PushRefspecs(ctx, remote, ref)
+}
+
+// PushRefspecs pushes one or more refspecs to the given remote.
+func (r *Repository) PushRefspecs(ctx context.Context, remote string, refspecs ...string) error {
+	if len(refspecs) == 0 {
+		return fmt.Errorf("git push %s: no refspecs provided", remote)
 	}
+
+	args := []string{"push", "-f", remote}
+	args = append(args, refspecs...)
+
+	_, err := gitCommand(r.Path, args...)
+	if err != nil {
+		return fmt.Errorf("git push %s %s: %w", remote, strings.Join(refspecs, " "), err)
+	}
+
 	return nil
+}
+
+// ResolveRef resolves the given ref to a commit SHA.
+func (r *Repository) ResolveRef(ref string) (string, error) {
+	out, err := gitCommand(r.Path, "rev-parse", ref)
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s: %w", ref, err)
+	}
+
+	return strings.TrimSpace(out), nil
+}
+
+// HasRef reports whether the given ref exists.
+func (r *Repository) HasRef(ref string) bool {
+	_, err := gitCommand(r.Path, "rev-parse", "--verify", "--quiet", ref)
+	return err == nil
 }
 
 // Fetch fetches from the specified remote.

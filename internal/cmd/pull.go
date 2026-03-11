@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pejas/kagen/internal/cluster"
+	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/ui"
 )
@@ -42,6 +43,10 @@ func runPull(cmd *cobra.Command, _ []string) error {
 		if err := repo.Commit("kagen: WIP local changes before pull"); err != nil {
 			return fmt.Errorf("creating WIP commit: %w", err)
 		}
+		repo, err = git.Discover(repo.Path)
+		if err != nil {
+			return fmt.Errorf("refreshing repository after WIP commit: %w", err)
+		}
 	}
 
 	// 4. Setup Forgejo service
@@ -67,11 +72,58 @@ func runPull(cmd *cobra.Command, _ []string) error {
 	}
 
 	mergeRef := repo.KagenRemoteTrackingBranch("kagen")
+	baseRef := repo.RemoteTrackingBranch("kagen")
+	if err := validatePullRefs(repo, mergeRef, baseRef); err != nil {
+		return err
+	}
+
 	ui.Info("Fast-forwarding %s from %s...", repo.CurrentBranch, repo.KagenBranch())
 	if err := repo.MergeFFOnly(ctx, mergeRef); err != nil {
 		return fmt.Errorf("fast-forwarding changes: %w", err)
 	}
 
 	ui.Success("Successfully fast-forwarded reviewed changes.")
+	return nil
+}
+
+func validatePullRefs(repo *git.Repository, reviewRef, baseRef string) error {
+	if !repo.HasRef(reviewRef) {
+		if repo.HasRef(baseRef) {
+			return fmt.Errorf(
+				"%w: expected reviewed changes on %s but only found %s; agent work may have been pushed to the canonical branch",
+				kagerr.ErrNoReviewableChanges,
+				reviewRef,
+				baseRef,
+			)
+		}
+
+		return fmt.Errorf("%w: remote branch %s not found", kagerr.ErrNoReviewableChanges, reviewRef)
+	}
+
+	if !repo.HasRef(baseRef) {
+		return nil
+	}
+
+	reviewSHA, err := repo.ResolveRef(reviewRef)
+	if err != nil {
+		return fmt.Errorf("resolving review ref %s: %w", reviewRef, err)
+	}
+	baseSHA, err := repo.ResolveRef(baseRef)
+	if err != nil {
+		return fmt.Errorf("resolving base ref %s: %w", baseRef, err)
+	}
+	headSHA, err := repo.ResolveRef("HEAD")
+	if err != nil {
+		return fmt.Errorf("resolving HEAD: %w", err)
+	}
+
+	if baseSHA != reviewSHA && baseSHA != headSHA {
+		return fmt.Errorf(
+			"unexpected remote branch state: %s advanced independently of %s; refusing to merge ambiguous review state",
+			baseRef,
+			reviewRef,
+		)
+	}
+
 	return nil
 }

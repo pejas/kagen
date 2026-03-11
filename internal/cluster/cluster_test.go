@@ -148,8 +148,8 @@ func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
 	if len(args) != 1 {
 		t.Fatalf("expected 1 script arg, got %d", len(args))
 	}
-	if !strings.Contains(args[0], `git checkout -b "main" "origin/kagen/main"`) {
-		t.Fatalf("workspace sync script missing kagen branch fallback: %q", args[0])
+	if !strings.Contains(args[0], `git checkout --track -b "kagen/main" "origin/kagen/main"`) {
+		t.Fatalf("workspace sync script missing review branch tracking checkout: %q", args[0])
 	}
 	if !strings.Contains(args[0], `git ls-remote "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git"`) {
 		t.Fatalf("workspace sync script missing forgejo availability check: %q", args[0])

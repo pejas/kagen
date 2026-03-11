@@ -100,9 +100,14 @@ func (f *ForgejoService) ensureForgejoRepo(ctx context.Context, namespace, podNa
 }
 
 func (f *ForgejoService) pushRepo(ctx context.Context, repo *git.Repository) error {
+	refspecs := []string{
+		"HEAD:" + repo.CurrentBranch,
+		"HEAD:" + repo.KagenBranch(),
+	}
+
 	var lastErr error
 	for i := 0; i < 5; i++ {
-		if err := repo.Push(ctx, "kagen", "HEAD:"+repo.KagenBranch()); err == nil {
+		if err := repo.PushRefspecs(ctx, "kagen", refspecs...); err == nil {
 			return nil
 		} else {
 			lastErr = err
