@@ -7,7 +7,7 @@ components:
     attributes:
       kagen.agent/runtime: codex
     container:
-      image: node:20-bookworm-slim
+      image: vxcontrol/codebase:latest
       command: ["/bin/sh", "-lc"]
       args:
         - |
