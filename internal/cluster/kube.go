@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pejas/kagen/internal/devfile"
 	"github.com/pejas/kagen/internal/git"
@@ -92,10 +93,16 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 
 	// 3. Reconcile Pod.
 	_, err = k.client.CoreV1().Pods(nsName).Create(ctx, pod, metav1.CreateOptions{})
-	if err != nil {
-		// Ignore if already exists, but Stage 3 doesn't handle updates yet.
-		// For now, if it exists, we just return nil.
+	if err == nil {
 		return nil
+	}
+
+	if !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating pod %s/%s: %w", nsName, pod.Name, err)
+	}
+
+	if err := k.replacePod(ctx, nsName, pod); err != nil {
+		return fmt.Errorf("replacing pod %s/%s: %w", nsName, pod.Name, err)
 	}
 
 	return nil
@@ -222,5 +229,37 @@ func (k *KubeManager) ensurePVC(ctx context.Context, ns, name string) error {
 		// ignore already exists
 		return nil
 	}
+	return nil
+}
+
+func (k *KubeManager) replacePod(ctx context.Context, namespace string, pod *corev1.Pod) error {
+	gracePeriodSeconds := int64(0)
+	if err := k.client.CoreV1().Pods(namespace).Delete(ctx, pod.Name, metav1.DeleteOptions{
+		GracePeriodSeconds: &gracePeriodSeconds,
+	}); err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("deleting existing pod: %w", err)
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		_, err := k.client.CoreV1().Pods(namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		if errors.IsNotFound(err) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("checking pod deletion: %w", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+
+	if _, err := k.client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("creating replacement pod: %w", err)
+	}
+
 	return nil
 }

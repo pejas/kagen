@@ -302,7 +302,7 @@ func (k *KubeManager) ensureProxyService(ctx context.Context, namespace, repoID 
 func (k *KubeManager) ensureAgentNetworkPolicy(ctx context.Context, namespace, repoID string) error {
 	policy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      proxyDeploymentName,
+			Name:      proxyPolicyName,
 			Namespace: namespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name": "kagen-proxy",
