@@ -1,0 +1,10 @@
+# kagen project configuration
+# See https://github.com/pejas/kagen for documentation.
+
+agent: codex
+
+# Additional egress destinations beyond agent API defaults.
+# proxy_allowlist:
+#   - api.openai.com
+#   - chatgpt.com
+#   - registry.npmjs.org

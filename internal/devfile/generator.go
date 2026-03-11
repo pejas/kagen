@@ -73,6 +73,11 @@ func (g *Generator) GeneratePod(name string, d *Devfile) (*corev1.Pod, error) {
 				})
 			}
 
+			if len(container.Command) == 0 && len(container.Args) == 0 {
+				container.Command = []string{"/bin/sh", "-lc"}
+				container.Args = []string{"exec tail -f /dev/null"}
+			}
+
 			pod.Spec.Containers = append(pod.Spec.Containers, container)
 		}
 

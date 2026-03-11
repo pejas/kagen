@@ -139,13 +139,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("parsing devfile: %w", err)
 	}
+	if !d.SupportsAgent(agentType) {
+		return fmt.Errorf("devfile.yaml does not declare a %s runtime: run 'kagen init --agent %s --force' or update the agent component attributes", agentType, agentType)
+	}
 
 	if err := cm.EnsureNamespace(ctx, repo); err != nil {
 		return fmt.Errorf("ensuring namespace: %w", err)
-	}
-
-	if err := cm.EnsureResources(ctx, repo, d); err != nil {
-		return fmt.Errorf("ensuring resources: %w", err)
 	}
 
 	// 7. Record import provenance.
@@ -167,6 +166,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	if err := fs.ImportRepo(ctx, repo); err != nil {
 		return fmt.Errorf("importing to forgejo: %w", err)
+	}
+
+	if err := cm.EnsureResources(ctx, repo, agentType, d); err != nil {
+		return fmt.Errorf("ensuring resources: %w", err)
 	}
 
 	// 9. Launch and attach agent.

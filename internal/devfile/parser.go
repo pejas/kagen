@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/pejas/kagen/internal/agent"
 	"gopkg.in/yaml.v2"
 )
 
@@ -19,9 +20,10 @@ type Metadata struct {
 }
 
 type Component struct {
-	Name      string     `yaml:"name"`
-	Container *Container `yaml:"container,omitempty"`
-	Volume    *Volume    `yaml:"volume,omitempty"`
+	Name       string     `yaml:"name"`
+	Container  *Container `yaml:"container,omitempty"`
+	Volume     *Volume    `yaml:"volume,omitempty"`
+	Attributes Attributes `yaml:"attributes,omitempty"`
 }
 
 type Container struct {
@@ -47,6 +49,8 @@ type VolumeMount struct {
 	Path string `yaml:"path"`
 }
 
+type Attributes map[string]string
+
 // Parse reads a simplified Devfile v2 from the given path.
 func Parse(path string) (*Devfile, error) {
 	data, err := os.ReadFile(path)
@@ -60,4 +64,16 @@ func Parse(path string) (*Devfile, error) {
 	}
 
 	return &d, nil
+}
+
+// SupportsAgent reports whether the devfile declares a runtime for the
+// requested agent.
+func (d *Devfile) SupportsAgent(agentType agent.Type) bool {
+	for _, component := range d.Components {
+		if component.Attributes["kagen.agent/runtime"] == string(agentType) {
+			return true
+		}
+	}
+
+	return false
 }

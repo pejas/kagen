@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/pejas/kagen/internal/agent"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 )
@@ -23,7 +24,7 @@ func TestStubManagerEnsureNamespace(t *testing.T) {
 func TestStubManagerEnsureResources(t *testing.T) {
 	t.Parallel()
 	mgr := NewStubManager()
-	err := mgr.EnsureResources(context.Background(), &git.Repository{}, nil)
+	err := mgr.EnsureResources(context.Background(), &git.Repository{}, agent.Codex, nil)
 	if err == nil {
 		t.Error("EnsureResources() expected error, got nil")
 	}

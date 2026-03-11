@@ -3,10 +3,13 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/devfile"
 	"github.com/pejas/kagen/internal/git"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -41,11 +44,13 @@ func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository)
 			},
 		},
 	}
+	if os.Getenv("KAGEN_E2E") == "true" {
+		ns.Labels["kagen.io/e2e"] = "true"
+	}
 
 	_, err := k.client.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 	if err != nil {
-		// Ignore if already exists.
-		if metav1.StatusReason(err.Error()) == metav1.StatusReasonAlreadyExists {
+		if errors.IsAlreadyExists(err) {
 			return nil
 		}
 		// Try to get it to be sure.
@@ -60,7 +65,7 @@ func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository)
 }
 
 // EnsureResources orchestrates the PVCs and Pod for the repository.
-func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, d *devfile.Devfile) error {
+func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType agent.Type, d *devfile.Devfile) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 
 	// 1. Generate Pod spec.
@@ -69,6 +74,9 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 	if err != nil {
 		return fmt.Errorf("generating pod spec: %w", err)
 	}
+	pod.Labels["kagen.io/repo-id"] = repo.ID()
+	injectWorkspaceSync(pod, repo)
+	injectAgentRuntime(pod, agentType)
 
 	// 2. Ensure PVCs (Stage 3 focuses on simple PVC existence).
 	// For this stage, we assume PVCs mentioned in devfile volumes are handled or we create simple ones.
@@ -90,6 +98,42 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 	}
 
 	return nil
+}
+
+func injectWorkspaceSync(pod *corev1.Pod, repo *git.Repository) {
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
+		Name:    "workspace-sync",
+		Image:   "alpine/git:2.47.2",
+		Command: []string{"/bin/sh", "-lc"},
+		Args: []string{fmt.Sprintf(`set -eu
+worktree=/projects/workspace
+rm -rf "$worktree"
+git clone "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git" "$worktree"
+cd "$worktree"
+git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
+`, repo.CurrentBranch, repo.CurrentBranch, repo.CurrentBranch)},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "git-workspace",
+				MountPath: "/projects",
+			},
+		},
+	})
+}
+
+func injectAgentRuntime(pod *corev1.Pod, agentType agent.Type) {
+	if len(pod.Spec.Containers) == 0 {
+		return
+	}
+
+	switch agentType {
+	case agent.Codex:
+		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env,
+			corev1.EnvVar{Name: "HOME", Value: "/home/kagen"},
+			corev1.EnvVar{Name: "CODEX_HOME", Value: "/home/kagen/.codex"},
+		)
+	default:
+	}
 }
 
 // AttachAgent connects the current terminal to the agent process.

@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/git"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -24,6 +27,8 @@ type ForgejoService struct {
 	client *kubernetes.Clientset
 	pf     cluster.PortForwarder
 }
+
+const forgejoConfigPath = "/etc/gitea/app.ini"
 
 // NewForgejoService returns a new ForgejoService.
 func NewForgejoService(client *kubernetes.Clientset, pf cluster.PortForwarder) *ForgejoService {
@@ -59,10 +64,15 @@ func (f *ForgejoService) EnsureRepo(ctx context.Context, repo *git.Repository) e
 					Labels: map[string]string{"app": "forgejo"},
 				},
 				Spec: corev1.PodSpec{
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsUser:  int64Ptr(1000),
+						RunAsGroup: int64Ptr(1000),
+						FSGroup:    int64Ptr(1000),
+					},
 					Containers: []corev1.Container{
 						{
 							Name:  "forgejo",
-							Image: "codeberg.org/forgejo/forgejo:1.21",
+							Image: "codeberg.org/forgejo/forgejo:1.21-rootless",
 							Ports: []corev1.ContainerPort{
 								{ContainerPort: 3000, Name: "http"},
 								{ContainerPort: 22, Name: "ssh"},
@@ -93,11 +103,10 @@ func (f *ForgejoService) EnsureRepo(ctx context.Context, repo *git.Repository) e
 	}
 
 	_, err = f.client.AppsV1().Deployments(ns).Create(ctx, deployment, metav1.CreateOptions{})
-	if err != nil && metav1.StatusReason(err.Error()) != metav1.StatusReasonAlreadyExists {
+	if err != nil && !errors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating forgejo deployment: %w", err)
 	}
 
-	// 3. Ensure Service
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "forgejo",
@@ -114,7 +123,7 @@ func (f *ForgejoService) EnsureRepo(ctx context.Context, repo *git.Repository) e
 	}
 
 	_, err = f.client.CoreV1().Services(ns).Create(ctx, service, metav1.CreateOptions{})
-	if err != nil && metav1.StatusReason(err.Error()) != metav1.StatusReasonAlreadyExists {
+	if err != nil && !errors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating forgejo service: %w", err)
 	}
 
@@ -137,14 +146,16 @@ func (f *ForgejoService) ensurePVC(ctx context.Context, ns string) error {
 		},
 	}
 	_, err := f.client.CoreV1().PersistentVolumeClaims(ns).Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil && metav1.StatusReason(err.Error()) != metav1.StatusReasonAlreadyExists {
+	if err != nil && !errors.IsAlreadyExists(err) {
 		return err
 	}
 	return nil
 }
 
 func (f *ForgejoService) waitReady(ctx context.Context, ns string) error {
-	// Simple readiness poll.
+	// Wait for the deployment to report a ready replica.
+	// ImportRepo performs its own retries when port-forwarding and talking
+	// to the API, so duplicating that work here adds a flaky extra gate.
 	for {
 		select {
 		case <-ctx.Done():
@@ -163,48 +174,110 @@ func (f *ForgejoService) waitReady(ctx context.Context, ns string) error {
 func (f *ForgejoService) ImportRepo(ctx context.Context, repo *git.Repository) error {
 	ns := fmt.Sprintf("kagen-%s", repo.ID())
 
-	// 1. Ensure admin user exists.
+	// 1. Ensure admin user exists with retries.
 	podName, err := f.getForgejoPod(ctx, ns)
 	if err != nil {
 		return err
 	}
 
 	createAdminCmd := []string{
-		"forgejo", "admin", "user", "create",
+		"forgejo", "--config", forgejoConfigPath, "admin", "user", "create",
 		"--username", "kagen",
 		"--password", "kagen-internal-secret",
 		"--email", "kagen@internal.local",
 		"--admin",
 		"--must-change-password=false",
 	}
-	_ = f.execInPod(ctx, ns, podName, createAdminCmd)
 
-	// 2. Start port-forward to Forgejo.
-	localPort, err := f.pf.Start(ctx, ns, "svc/forgejo", 3000)
-	if err != nil {
-		return fmt.Errorf("starting port-forward to forgejo: %w", err)
+	for i := 0; i < 5; i++ {
+		out, err := f.execInPod(ctx, ns, podName, createAdminCmd)
+		if err == nil || strings.Contains(out, "already exists") || strings.Contains(err.Error(), "already exists") {
+			break
+		}
+		fmt.Fprintf(os.Stderr, "ℹ Retry user creation (%d/5)... output: %s, err: %v\n", i+1, out, err)
+		time.Sleep(2 * time.Second)
+	}
+
+	// Verify user exists via CLI
+	listCmd := []string{"forgejo", "--config", forgejoConfigPath, "admin", "user", "list"}
+	out, _ := f.execInPod(ctx, ns, podName, listCmd)
+	if !strings.Contains(out, "kagen") {
+		fmt.Fprintf(os.Stderr, "⚠ User 'kagen' not found in user list: %s\n", out)
+	}
+
+	// Wait for user to be available in API
+	time.Sleep(2 * time.Second)
+
+	// 2. Start port-forward to the Forgejo pod and verify the API is reachable.
+	var (
+		lastErr   error
+		localPort int
+	)
+	for i := 0; i < 5; i++ {
+		localPort, err = f.pf.Start(ctx, ns, "pod/"+podName, 3000)
+		if err != nil {
+			lastErr = fmt.Errorf("starting port-forward to forgejo: %w", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if err := f.waitForAPI(ctx, localPort); err != nil {
+			_ = f.pf.Stop()
+			lastErr = err
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if err := f.createRepo(localPort, "workspace"); err == nil {
+			lastErr = nil
+			break
+		} else {
+			_ = f.pf.Stop()
+			lastErr = err
+			time.Sleep(1 * time.Second)
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("failed to create forgejo repo after retries: %w", lastErr)
 	}
 	defer f.pf.Stop()
 
-	// 3. Create the repository via API.
-	if err := f.createRepo(localPort, "workspace"); err != nil {
-		// Ignore if already exists.
-		// ui.Info("Forgejo repository 'workspace' already exists or created.") // Assuming ui.Info is defined elsewhere
-	}
-
-	// 4. Configure git remote and push.
-	// We use the localPort assigned by port-forward.
+	// 4. Configure git remote and push with retries.
 	remoteUrl := fmt.Sprintf("http://kagen:kagen-internal-secret@127.0.0.1:%d/kagen/workspace.git", localPort)
-
-	// Ensure remote exists
 	_ = repo.AddRemote("kagen", remoteUrl)
 
-	// Push current head to Forgejo
-	if err := repo.Push(ctx, "kagen", "HEAD:"+repo.CurrentBranch); err != nil {
-		return fmt.Errorf("pushing to forgejo: %w", err)
+	for i := 0; i < 5; i++ {
+		if err := repo.Push(ctx, "kagen", "HEAD:"+repo.CurrentBranch); err == nil {
+			return nil
+		} else {
+			lastErr = err
+			time.Sleep(1 * time.Second)
+		}
 	}
 
-	return nil
+	return fmt.Errorf("pushing to forgejo: %w", lastErr)
+}
+
+func (f *ForgejoService) waitForAPI(ctx context.Context, port int) error {
+	versionURL := fmt.Sprintf("http://127.0.0.1:%d/api/v1/version", port)
+
+	for i := 0; i < 30; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			resp, err := http.Get(versionURL)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					return nil
+				}
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for forgejo API on local port %d", port)
 }
 
 func (f *ForgejoService) createRepo(port int, name string) error {
@@ -246,13 +319,14 @@ func (f *ForgejoService) getForgejoPod(ctx context.Context, ns string) (string, 
 	return pods.Items[0].Name, nil
 }
 
-func (f *ForgejoService) execInPod(ctx context.Context, ns, pod string, command []string) error {
+func (f *ForgejoService) execInPod(ctx context.Context, ns, pod string, command []string) (string, error) {
 	args := append([]string{"exec", "-n", ns, pod, "--"}, command...)
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("kubectl exec failed: %s: %w", string(out), err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("kubectl exec failed: %s: %w", string(out), err)
 	}
-	return nil
+	return string(out), nil
 }
 
 // GetReviewURL returns the local browser URL for the repository review in Forgejo.
@@ -268,3 +342,4 @@ func (f *ForgejoService) HasNewCommits(ctx context.Context, repo *git.Repository
 }
 
 func int32Ptr(i int32) *int32 { return &i }
+func int64Ptr(i int64) *int64 { return &i }

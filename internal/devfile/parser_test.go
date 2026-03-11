@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/pejas/kagen/internal/agent"
 )
 
 func TestParse(t *testing.T) {
@@ -16,6 +18,8 @@ metadata:
   name: test-project
 components:
   - name: web
+    attributes:
+      kagen.agent/runtime: codex
     container:
       image: nginx:latest
       memoryLimit: 512Mi
@@ -31,6 +35,9 @@ components:
 
 	if d.Metadata.Name != "test-project" {
 		t.Errorf("Metadata.Name = %v, want test-project", d.Metadata.Name)
+	}
+	if !d.SupportsAgent(agent.Codex) {
+		t.Error("SupportsAgent(codex) = false, want true")
 	}
 }
 

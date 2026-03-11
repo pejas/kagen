@@ -14,7 +14,7 @@
 ### 1. Host Layer (CLI)
 The `kagen` Go binary orchestrates:
 - **Runtime Manager (`internal/runtime`)**: Lifecycle of the Colima `kagen` profile and K3s connectivity.
-- **Cluster Manager (`internal/cluster`)**: Translation of `devfile.yaml` into Kubernetes Pods, Namespaces, and PVCs.
+- **Cluster Manager (`internal/cluster`)**: Translation of `devfile.yaml` into Kubernetes Pods, Namespaces, PVCs, and workspace bootstrap init containers.
 - **Git Engine (`internal/git`)**: Local Git operations, repository discovery, and WIP protection commits.
 - **Port-Forwarder**: Bridges the host network to in-cluster services (Forgejo, Proxy).
 
@@ -22,7 +22,7 @@ The `kagen` Go binary orchestrates:
 K3s provides the workload isolation:
 - **Namespace**: Created per repository (`kagen-<repo-id>`).
 - **Forgejo**: A lightweight Git service running inside the cluster to host the review boundary.
-- **Agent Pod**: A Pod generated from the repository's `devfile.yaml`, injected with agent binaries (Claude, Codex, etc.).
+- **Agent Pod**: A Pod generated from the repository's `devfile.yaml`, with the selected agent runtime provisioned inside the VM and the repository cloned into `/projects/workspace`.
 - **Persistence**: Managed through standard Kubernetes PVCs.
 
 ## Data Flow
@@ -31,6 +31,7 @@ K3s provides the workload isolation:
    - CLI checks Colima status.
    - CLI ensures K8s resources (Namespace, PVC, Forgejo).
    - CLI imports current Host HEAD into in-cluster Forgejo.
+   - CLI creates the Agent Pod after Forgejo import so an init container can clone the in-cluster repository into the workspace volume.
    - CLI launches Agent Pod and attaches the TUI.
 3. **Work**: Agent performs changes inside the Pod.
 4. **Checkpoint**: On exit, CLI creates a WIP commit in the cluster and pushes to Forgejo.
@@ -39,5 +40,5 @@ K3s provides the workload isolation:
 
 ## Security Controls
 - **Egress Proxy**: All agent network traffic is routed through a proxy with a project-level allowlist.
-- **Credential Isolation**: Agent auth tokens (e.g., Claude OAuth) are stored in a dedicated K8s PVC, never exposed to the host's `.config` or `.bash_history`.
+- **Credential Isolation**: Agent auth state (for example Codex login state in `.codex`) is stored in a dedicated K8s PVC, never exposed to the host's shell history or host-side config directories.
 - **Filesystem Silo**: The agent only has access to the workspace volume and the auth PVC.

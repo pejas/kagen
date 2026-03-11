@@ -59,6 +59,9 @@ components:
 	if container.Image != "nodejs:16" {
 		t.Errorf("Container.Image = %v, want nodejs:16", container.Image)
 	}
+	if len(container.Command) != 2 || container.Command[0] != "/bin/sh" {
+		t.Errorf("Container.Command = %v, want default shell keepalive", container.Command)
+	}
 
 	// check env
 	foundPort := false

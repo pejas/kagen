@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -36,6 +37,8 @@ func (p *KubectlPortForwarder) Start(ctx context.Context, namespace, target stri
 	args := []string{"port-forward", "-n", namespace, target, fmt.Sprintf("%s:%d", localPortStr, port)}
 	p.cmd = exec.CommandContext(ctx, "kubectl", args...)
 
+	var stderr bytes.Buffer
+	p.cmd.Stderr = &stderr
 	stdout, err := p.cmd.StdoutPipe()
 	if err != nil {
 		return 0, fmt.Errorf("getting stdout pipe: %w", err)
@@ -50,7 +53,7 @@ func (p *KubectlPortForwarder) Start(ctx context.Context, namespace, target stri
 	n, err := stdout.Read(buf)
 	if err != nil {
 		_ = p.cmd.Process.Kill()
-		return 0, fmt.Errorf("reading kubectl output: %w", err)
+		return 0, fmt.Errorf("reading kubectl output: %w (stderr: %s)", err, stderr.String())
 	}
 
 	output := string(buf[:n])
