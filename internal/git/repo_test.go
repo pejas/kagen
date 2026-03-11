@@ -73,6 +73,15 @@ func TestKagenBranch(t *testing.T) {
 	}
 }
 
+func TestKagenRemoteTrackingBranch(t *testing.T) {
+	t.Parallel()
+
+	repo := &Repository{CurrentBranch: "feature/x"}
+	if got := repo.KagenRemoteTrackingBranch("kagen"); got != "kagen/kagen/feature/x" {
+		t.Errorf("expected kagen/kagen/feature/x, got %q", got)
+	}
+}
+
 func TestMergeFFOnly(t *testing.T) {
 	t.Parallel()
 

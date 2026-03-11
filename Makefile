@@ -26,7 +26,7 @@ build:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) ./$(BUILD_DIR)
 
 ## test: run all tests with race detector
-test:
+test: build
 	$(GOTEST) -race -count=1 -v ./...
 
 ## lint: run golangci-lint

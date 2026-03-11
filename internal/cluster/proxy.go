@@ -137,24 +137,19 @@ ConnectPort 80
 ConnectPort 443
 ConnectPort 22
 Filter "%s/allowlist"
-FilterURLs On
 FilterDefaultDeny Yes
 `, proxyPort, proxyConfigDir)
 }
 
 func proxyAllowlist(destinations []string) string {
-	patterns := make([]string, 0, len(destinations)*2)
+	patterns := make([]string, 0, len(destinations))
 	for _, destination := range destinations {
 		host := strings.TrimSpace(destination)
 		if host == "" {
 			continue
 		}
 
-		escaped := regexp.QuoteMeta(host)
-		patterns = append(patterns,
-			fmt.Sprintf("^https?://%s(:[0-9]+)?/", escaped),
-			fmt.Sprintf("^%s(:[0-9]+)?$", escaped),
-		)
+		patterns = append(patterns, regexp.QuoteMeta(host))
 	}
 
 	return strings.Join(patterns, "\n")

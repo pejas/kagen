@@ -91,6 +91,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if err := ensureProjectDevfileExists(); err != nil {
+		return err
+	}
+
 	agentType, err := resolveAgent(repo, kubeCtx, cfg)
 	if err != nil {
 		return err
@@ -106,10 +110,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureForgejoImport(ctx, forgejoService, repo); err != nil {
+	if err := ensureClusterResources(ctx, kubeCtx, repo, cfg, agentType, d); err != nil {
 		return err
 	}
-	if err := ensureClusterResources(ctx, kubeCtx, repo, cfg, agentType, d); err != nil {
+	if err := ensureForgejoImport(ctx, forgejoService, repo); err != nil {
 		return err
 	}
 	if err := validateProxyPolicy(ctx, kubeCtx, repo, cfg); err != nil {

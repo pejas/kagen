@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -74,9 +75,10 @@ func (c *testContext) iRun(command string) error {
 		return fmt.Errorf("unexpected command: %s", args[0])
 	}
 
-	// Calculate absolute path to kagen binary in project root
-	wd, _ := os.Getwd()
-	binPath := filepath.Join(wd, "..", "..", "bin", "kagen")
+	binPath, err := kagenBinaryPath()
+	if err != nil {
+		return err
+	}
 
 	cmd := exec.Command(binPath, args[1:]...)
 	cmd.Dir = c.tmpDir
@@ -90,7 +92,7 @@ func (c *testContext) iRun(command string) error {
 	cmd.Stdout = &c.out
 	cmd.Stderr = &c.out
 
-	err := cmd.Run()
+	err = cmd.Run()
 	c.lastOutput = c.out.String()
 
 	if err != nil {
@@ -104,6 +106,15 @@ func (c *testContext) iRun(command string) error {
 	c.exitCode = 0
 	c.err = nil
 	return nil
+}
+
+func kagenBinaryPath() (string, error) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("resolving e2e test path: runtime caller unavailable")
+	}
+
+	return filepath.Join(filepath.Dir(filename), "..", "..", "bin", "kagen"), nil
 }
 
 func (c *testContext) theFileShouldExist(filename string) error {

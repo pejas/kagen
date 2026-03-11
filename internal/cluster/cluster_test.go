@@ -127,4 +127,47 @@ func TestTinyproxyConfigUsesDedicatedConfigDir(t *testing.T) {
 	if strings.Contains(cfg, "/etc/tinyproxy/allowlist") {
 		t.Fatalf("tinyproxyConfig() still references package config path: %q", cfg)
 	}
+	if strings.Contains(cfg, "FilterURLs On") {
+		t.Fatalf("tinyproxyConfig() should not enable URL-path filtering: %q", cfg)
+	}
+}
+
+func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
+	t.Parallel()
+
+	pod := &corev1.Pod{}
+	repo := &git.Repository{CurrentBranch: "main"}
+
+	injectWorkspaceSync(pod, repo)
+
+	if len(pod.Spec.InitContainers) != 1 {
+		t.Fatalf("expected 1 init container, got %d", len(pod.Spec.InitContainers))
+	}
+
+	args := pod.Spec.InitContainers[0].Args
+	if len(args) != 1 {
+		t.Fatalf("expected 1 script arg, got %d", len(args))
+	}
+	if !strings.Contains(args[0], `git checkout -b "main" "origin/kagen/main"`) {
+		t.Fatalf("workspace sync script missing kagen branch fallback: %q", args[0])
+	}
+	if !strings.Contains(args[0], `git ls-remote "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git"`) {
+		t.Fatalf("workspace sync script missing forgejo availability check: %q", args[0])
+	}
+}
+
+func TestProxyAllowlistUsesEscapedHostPatterns(t *testing.T) {
+	t.Parallel()
+
+	got := proxyAllowlist([]string{"registry.npmjs.org", " api.openai.com "})
+
+	if strings.Contains(got, "https?://") || strings.Contains(got, "[0-9]+") {
+		t.Fatalf("proxyAllowlist() should use host-only patterns, got %q", got)
+	}
+	if !strings.Contains(got, "registry\\.npmjs\\.org") {
+		t.Fatalf("proxyAllowlist() missing escaped npm host: %q", got)
+	}
+	if !strings.Contains(got, "api\\.openai\\.com") {
+		t.Fatalf("proxyAllowlist() missing trimmed OpenAI host: %q", got)
+	}
 }

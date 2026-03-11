@@ -1,5 +1,7 @@
 # Kagen
 
+![Kagen](docs/kagen.png)
+
 ## What
 Kagen is a local, security-first agent runtime for Git repositories.
 

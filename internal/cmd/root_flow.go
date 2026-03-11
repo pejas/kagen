@@ -58,8 +58,8 @@ func loadRunConfig() (*config.Config, error) {
 }
 
 func loadProjectDevfile(agentType agent.Type) (*devfile.Devfile, error) {
-	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
+	if err := ensureProjectDevfileExists(); err != nil {
+		return nil, err
 	}
 
 	d, err := devfile.Parse(devfilePath)
@@ -71,6 +71,14 @@ func loadProjectDevfile(agentType agent.Type) (*devfile.Devfile, error) {
 	}
 
 	return d, nil
+}
+
+func ensureProjectDevfileExists() error {
+	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
+		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
+	}
+
+	return nil
 }
 
 func ensureRuntime(ctx context.Context, cfg *config.Config) (string, error) {

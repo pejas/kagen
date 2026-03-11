@@ -109,10 +109,16 @@ func injectWorkspaceSync(pod *corev1.Pod, repo *git.Repository) {
 		Args: []string{fmt.Sprintf(`set -eu
 worktree=/projects/workspace
 rm -rf "$worktree"
+for _ in $(seq 1 90); do
+  if git ls-remote "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
 git clone "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git" "$worktree"
 cd "$worktree"
 git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
-`, repo.CurrentBranch, repo.CurrentBranch, repo.CurrentBranch)},
+`, repo.CurrentBranch, repo.CurrentBranch, repo.KagenBranch())},
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      "git-workspace",

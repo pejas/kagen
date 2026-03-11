@@ -18,5 +18,5 @@ Feature: Synchronizing Changes
     And I run "kagen pull"
     Then it should create a WIP commit
     And it should fetch changes from Forgejo
-    And the output should contain "Successfully pulled and merged reviewed changes"
+    And the output should contain "Successfully fast-forwarded reviewed changes"
     And the exit code should be 0

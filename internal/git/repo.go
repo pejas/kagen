@@ -38,6 +38,12 @@ func (r *Repository) KagenBranch() string {
 	return "kagen/" + r.CurrentBranch
 }
 
+// KagenRemoteTrackingBranch returns the local remote-tracking ref for the
+// in-cluster branch on the given remote.
+func (r *Repository) KagenRemoteTrackingBranch(remote string) string {
+	return remote + "/" + r.KagenBranch()
+}
+
 // Discover walks up from startPath to find the root of a Git repository.
 // Returns ErrNotGitRepo if no repository is found.
 func Discover(startPath string) (*Repository, error) {

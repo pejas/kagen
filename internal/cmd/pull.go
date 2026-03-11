@@ -66,8 +66,9 @@ func runPull(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("fetching from forgejo: %w", err)
 	}
 
+	mergeRef := repo.KagenRemoteTrackingBranch("kagen")
 	ui.Info("Fast-forwarding %s from %s...", repo.CurrentBranch, repo.KagenBranch())
-	if err := repo.MergeFFOnly(ctx, repo.KagenBranch()); err != nil {
+	if err := repo.MergeFFOnly(ctx, mergeRef); err != nil {
 		return fmt.Errorf("fast-forwarding changes: %w", err)
 	}
 
