@@ -234,6 +234,10 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 }
 
 func TestFeatures(t *testing.T) {
+	if _, err := exec.LookPath("kubectl"); err != nil {
+		t.Skip("skipping e2e tests: kubectl not found in PATH")
+	}
+
 	if err := cleanupE2ENamespaces(); err != nil {
 		t.Fatalf("cleaning e2e namespaces before test run: %v", err)
 	}

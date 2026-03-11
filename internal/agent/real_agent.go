@@ -8,27 +8,29 @@ import (
 	"time"
 
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/kubeexec"
 )
 
-// BaseAgent provides shared functionality for agent implementations.
-type BaseAgent struct {
+// baseAgent provides shared functionality for agent implementations.
+type baseAgent struct {
 	agentType Type
 	name      string
 	repo      *git.Repository
 	kubeCtx   string
+	exec      kubeexec.Runner
 }
 
-func (b *BaseAgent) Name() string    { return b.name }
-func (b *BaseAgent) AgentType() Type { return b.agentType }
+func (b *baseAgent) Name() string    { return b.name }
+func (b *baseAgent) AgentType() Type { return b.agentType }
 
 // Authenticate is a no-op by default, overridden by agents that need it.
-func (b *BaseAgent) Authenticate(ctx context.Context) error {
+func (b *baseAgent) Authenticate(ctx context.Context) error {
 	return nil
 }
 
 // Launch ensures the agent process is prepared. For most, this is a no-op
 // as the Pod generation already includes the container.
-func (b *BaseAgent) Launch(ctx context.Context) error {
+func (b *baseAgent) Launch(ctx context.Context) error {
 	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
 
 	waitArgs := []string{
@@ -54,8 +56,11 @@ func (b *BaseAgent) Launch(ctx context.Context) error {
 }
 
 // Attach connects the user's terminal to the agent process in the cluster.
-func (b *BaseAgent) Attach(ctx context.Context) error {
+func (b *baseAgent) Attach(ctx context.Context) error {
 	if os.Getenv("KAGEN_NON_INTERACTIVE") == "true" {
+		return nil
+	}
+	if b.exec == nil {
 		return nil
 	}
 
@@ -65,24 +70,10 @@ func (b *BaseAgent) Attach(ctx context.Context) error {
 	// In a real implementation, we'd look up the pod by labels.
 	podName := "agent" // Simplified for now, should be looked up
 
-	args := []string{
-		"--context", b.kubeCtx,
-		"exec", "-it",
-		"-n", ns,
-		podName,
-		"--",
-	}
-	args = append(args, b.commandArgs()...)
-
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	return b.exec.Attach(ctx, ns, podName, b.commandArgs())
 }
 
-func (b *BaseAgent) commandArgs() []string {
+func (b *baseAgent) commandArgs() []string {
 	switch b.agentType {
 	case Claude:
 		return []string{"claude-code"}
@@ -100,19 +91,13 @@ func (b *BaseAgent) commandArgs() []string {
 	}
 }
 
-func (b *BaseAgent) waitForCodex(ctx context.Context, namespace string) error {
+func (b *baseAgent) waitForCodex(ctx context.Context, namespace string) error {
 	for i := 0; i < 90; i++ {
-		args := []string{
-			"--context", b.kubeCtx,
-			"exec",
-			"-n", namespace,
-			"agent",
-			"--",
+		command := []string{
 			"/bin/sh", "-lc",
 			"test -d /projects/workspace/.git && command -v codex >/dev/null 2>&1",
 		}
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
-		if err := cmd.Run(); err == nil {
+		if _, err := b.exec.Run(ctx, namespace, "agent", command); err == nil {
 			return nil
 		}
 
@@ -128,30 +113,33 @@ func (b *BaseAgent) waitForCodex(ctx context.Context, namespace string) error {
 
 // NewClaudeAgent returns a real Claude agent.
 func NewClaudeAgent(repo *git.Repository, kubeCtx string) Agent {
-	return &BaseAgent{
+	return &baseAgent{
 		agentType: Claude,
 		name:      "Claude",
 		repo:      repo,
 		kubeCtx:   kubeCtx,
+		exec:      kubeexec.NewRunner(kubeCtx),
 	}
 }
 
 // NewCodexAgent returns a real Codex agent.
 func NewCodexAgent(repo *git.Repository, kubeCtx string) Agent {
-	return &BaseAgent{
+	return &baseAgent{
 		agentType: Codex,
 		name:      "Codex",
 		repo:      repo,
 		kubeCtx:   kubeCtx,
+		exec:      kubeexec.NewRunner(kubeCtx),
 	}
 }
 
 // NewOpenCodeAgent returns a real OpenCode agent.
 func NewOpenCodeAgent(repo *git.Repository, kubeCtx string) Agent {
-	return &BaseAgent{
+	return &baseAgent{
 		agentType: OpenCode,
 		name:      "OpenCode",
 		repo:      repo,
 		kubeCtx:   kubeCtx,
+		exec:      kubeexec.NewRunner(kubeCtx),
 	}
 }

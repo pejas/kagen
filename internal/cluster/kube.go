@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/devfile"
 	"github.com/pejas/kagen/internal/git"
 	corev1 "k8s.io/api/core/v1"
@@ -65,7 +64,7 @@ func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository)
 }
 
 // EnsureResources orchestrates the PVCs and Pod for the repository.
-func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType agent.Type, d *devfile.Devfile) error {
+func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 
 	// 1. Generate Pod spec.
@@ -121,13 +120,13 @@ git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
 	})
 }
 
-func injectAgentRuntime(pod *corev1.Pod, agentType agent.Type) {
+func injectAgentRuntime(pod *corev1.Pod, agentType string) {
 	if len(pod.Spec.Containers) == 0 {
 		return
 	}
 
 	switch agentType {
-	case agent.Codex:
+	case "codex":
 		pod.Spec.Containers[0].Env = append(pod.Spec.Containers[0].Env,
 			corev1.EnvVar{Name: "HOME", Value: "/home/kagen"},
 			corev1.EnvVar{Name: "CODEX_HOME", Value: "/home/kagen/.codex"},

@@ -80,7 +80,7 @@ func TestLoadHierarchy(t *testing.T) {
 	}
 
 	// Global config.
-	if err := os.WriteFile(filepath.Join(configDir, "main.yml"), []byte("agent: global\nverbose: true\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, "main.yml"), []byte("agent: codex\nverbose: true\n"), 0o644); err != nil {
 		t.Fatalf("failed to write global config: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestLoadHierarchy(t *testing.T) {
 	projectDir := t.TempDir()
 	os.Chdir(projectDir)
 
-	if err := os.WriteFile(".kagen.yaml", []byte("agent: project\n"), 0o644); err != nil {
+	if err := os.WriteFile(".kagen.yaml", []byte("agent: claude\n"), 0o644); err != nil {
 		t.Fatalf("failed to write project config: %v", err)
 	}
 
@@ -101,10 +101,32 @@ func TestLoadHierarchy(t *testing.T) {
 		t.Fatalf("Load() returned error: %v", err)
 	}
 
-	if cfg.Agent != "project" {
-		t.Errorf("expected Agent=project (override), got %q", cfg.Agent)
+	if cfg.Agent != "claude" {
+		t.Errorf("expected Agent=claude (override), got %q", cfg.Agent)
 	}
 	if !cfg.Verbose {
 		t.Error("expected Verbose=true (inherited from global)")
+	}
+}
+
+func TestValidateRejectsInvalidAgent(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.Agent = "unknown"
+
+	if err := Validate(cfg); err == nil {
+		t.Fatal("Validate() expected error for invalid agent")
+	}
+}
+
+func TestValidateRejectsInvalidRuntime(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.Runtime.StartupTimeout = "not-a-duration"
+
+	if err := Validate(cfg); err == nil {
+		t.Fatal("Validate() expected error for invalid startup timeout")
 	}
 }

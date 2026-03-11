@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,14 +11,9 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/pejas/kagen/internal/agent"
-	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/config"
-	"github.com/pejas/kagen/internal/devfile"
 	kagerr "github.com/pejas/kagen/internal/errors"
-	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
-	"github.com/pejas/kagen/internal/provenance"
-	"github.com/pejas/kagen/internal/runtime"
 	"github.com/pejas/kagen/internal/ui"
 )
 
@@ -80,110 +74,49 @@ func Execute() {
 // runRoot implements the default `kagen` flow: discover repo, ensure runtime,
 // resolve agent, set up cluster resources, import to Forgejo, and attach.
 func runRoot(cmd *cobra.Command, _ []string) error {
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	ctx := rootContext(cmd.Context())
 
-	// 1. Discover the current Git repository.
-	cwd, err := os.Getwd()
+	cfg, err := loadRunConfig()
 	if err != nil {
-		return fmt.Errorf("getting working directory: %w", err)
+		return err
 	}
 
-	repo, err := git.Discover(cwd)
+	repo, err := discoverRepository()
 	if err != nil {
-		if errors.Is(err, kagerr.ErrNotGitRepo) {
-			return fmt.Errorf("%w: run kagen from within a git repository", kagerr.ErrNotGitRepo)
-		}
-		return fmt.Errorf("discovering repository: %w", err)
-	}
-	ui.Info("Repository: %s (branch: %s)", repo.Path, repo.CurrentBranch)
-
-	// 2. Validate environment (pre-flight).
-	devfilePath := "devfile.yaml"
-	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
-		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
+		return err
 	}
 
-	// 3. Load configuration.
-	cfg, err := config.Load()
+	kubeCtx, err := ensureRuntime(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("loading configuration: %w", err)
+		return err
 	}
 
-	// 4. Ensure local runtime is healthy.
-	ui.Info("Ensuring local runtime is healthy...")
-	rtm := runtime.NewColimaManager(cfg.Runtime)
-	if err := rtm.EnsureRunning(ctx); err != nil {
-		return fmt.Errorf("runtime not available: %w", err)
-	}
-	kubeCtx := rtm.KubeContext()
-
-	// 5. Resolve the agent type.
 	agentType, err := resolveAgent(repo, kubeCtx, cfg)
 	if err != nil {
 		return err
 	}
 	ui.Info("Agent: %s", agentType)
 
-	// 6. Ensure cluster resources.
-	ui.Info("Ensuring cluster resources for %s/%s...", agentType, repo.CurrentBranch)
-	cm, err := cluster.NewKubeManager(kubeCtx)
-	if err != nil {
-		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
-	}
-
-	// 6.1 Parse Devfile for resource generation.
-	d, err := devfile.Parse(devfilePath)
-	if err != nil {
-		return fmt.Errorf("parsing devfile: %w", err)
-	}
-	if !d.SupportsAgent(agentType) {
-		return fmt.Errorf("devfile.yaml does not declare a %s runtime: run 'kagen init --agent %s --force' or update the agent component attributes", agentType, agentType)
-	}
-
-	if err := cm.EnsureNamespace(ctx, repo); err != nil {
-		return fmt.Errorf("ensuring namespace: %w", err)
-	}
-
-	// 7. Record import provenance.
-	rec := provenance.RecordImport(repo)
-	ui.Info("Import provenance: %s@%s (%s)", rec.SourceBranch, rec.SourceCommitSHA[:8], rec.ImportedAt.Format("2006-01-02T15:04:05Z"))
-
-	// 8. Import repository to Forgejo.
-	ui.Info("Importing repository to Forgejo...")
-	clientset, err := cluster.NewClientset(kubeCtx)
-	if err != nil {
-		return fmt.Errorf("creating kubernetes clientset: %w", err)
-	}
-	pf := cluster.NewPortForwarder()
-	fs := forgejo.NewForgejoService(clientset, pf)
-
-	if err := fs.EnsureRepo(ctx, repo); err != nil {
-		return fmt.Errorf("ensuring forgejo repo: %w", err)
-	}
-
-	if err := fs.ImportRepo(ctx, repo); err != nil {
-		return fmt.Errorf("importing to forgejo: %w", err)
-	}
-
-	if err := cm.EnsureResources(ctx, repo, agentType, d); err != nil {
-		return fmt.Errorf("ensuring resources: %w", err)
-	}
-
-	// 9. Launch and attach agent.
-	ui.Info("Launching agent %s...", agentType)
-	registry := agent.NewRegistry(repo, kubeCtx)
-	a, err := registry.Get(agentType)
+	d, err := loadProjectDevfile(agentType)
 	if err != nil {
 		return err
 	}
-	if err := a.Launch(ctx); err != nil {
-		return fmt.Errorf("launching agent: %w", err)
+
+	forgejoService, err := newForgejoService(kubeCtx)
+	if err != nil {
+		return err
+	}
+	if err := ensureForgejoImport(ctx, forgejoService, repo); err != nil {
+		return err
+	}
+	if err := ensureClusterResources(ctx, kubeCtx, repo, agentType, d); err != nil {
+		return err
+	}
+	if err := validateProxyPolicy(cfg); err != nil {
+		return err
 	}
 
-	return a.Attach(ctx)
+	return launchAgent(ctx, repo, kubeCtx, agentType)
 }
 
 // resolveAgent determines which agent to use from the flag, config, or

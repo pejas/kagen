@@ -99,6 +99,9 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unmarshalling config: %w", err)
 	}
+	if err := Validate(cfg); err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
 
 	return cfg, nil
 }

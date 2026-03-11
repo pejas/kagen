@@ -14,6 +14,7 @@ import (
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/kubeexec"
 	"github.com/pejas/kagen/internal/runtime"
 	"github.com/pejas/kagen/internal/ui"
 )
@@ -56,7 +57,7 @@ func runOpen(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("creating kubernetes clientset: %w", err)
 	}
 	pf := cluster.NewPortForwarder()
-	svc := forgejo.NewForgejoService(clientset, pf)
+	svc := forgejo.NewForgejoService(clientset, pf, kubeexec.NewRunner(kubeCtx))
 
 	// In Stage 4, we assume the environment is running if we're calling open.
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/devfile"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
@@ -17,7 +16,7 @@ type Manager interface {
 	EnsureNamespace(ctx context.Context, repo *git.Repository) error
 
 	// EnsureResources orchestrates the PVCs, Pod, and other resources for the repository.
-	EnsureResources(ctx context.Context, repo *git.Repository, agentType agent.Type, d *devfile.Devfile) error
+	EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile) error
 
 	// AttachAgent connects the current terminal to the agent process inside the Pod.
 	AttachAgent(ctx context.Context, repo *git.Repository) error
@@ -43,7 +42,7 @@ func (s *StubManager) EnsureNamespace(_ context.Context, _ *git.Repository) erro
 	return fmt.Errorf("ensure namespace: %w", kagerr.ErrNotImplemented)
 }
 
-func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ agent.Type, _ *devfile.Devfile) error {
+func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ string, _ *devfile.Devfile) error {
 	return fmt.Errorf("ensure resources: %w", kagerr.ErrNotImplemented)
 }
 

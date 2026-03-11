@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/kubeexec"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -26,15 +26,17 @@ import (
 type ForgejoService struct {
 	client *kubernetes.Clientset
 	pf     cluster.PortForwarder
+	exec   kubeexec.Runner
 }
 
 const forgejoConfigPath = "/etc/gitea/app.ini"
 
 // NewForgejoService returns a new ForgejoService.
-func NewForgejoService(client *kubernetes.Clientset, pf cluster.PortForwarder) *ForgejoService {
+func NewForgejoService(client *kubernetes.Clientset, pf cluster.PortForwarder, execRunner kubeexec.Runner) *ForgejoService {
 	return &ForgejoService{
 		client: client,
 		pf:     pf,
+		exec:   execRunner,
 	}
 }
 
@@ -190,7 +192,7 @@ func (f *ForgejoService) ImportRepo(ctx context.Context, repo *git.Repository) e
 	}
 
 	for i := 0; i < 5; i++ {
-		out, err := f.execInPod(ctx, ns, podName, createAdminCmd)
+		out, err := f.exec.Run(ctx, ns, podName, createAdminCmd)
 		if err == nil || strings.Contains(out, "already exists") || strings.Contains(err.Error(), "already exists") {
 			break
 		}
@@ -200,7 +202,7 @@ func (f *ForgejoService) ImportRepo(ctx context.Context, repo *git.Repository) e
 
 	// Verify user exists via CLI
 	listCmd := []string{"forgejo", "--config", forgejoConfigPath, "admin", "user", "list"}
-	out, _ := f.execInPod(ctx, ns, podName, listCmd)
+	out, _ := f.exec.Run(ctx, ns, podName, listCmd)
 	if !strings.Contains(out, "kagen") {
 		fmt.Fprintf(os.Stderr, "⚠ User 'kagen' not found in user list: %s\n", out)
 	}
@@ -317,16 +319,6 @@ func (f *ForgejoService) getForgejoPod(ctx context.Context, ns string) (string, 
 		return "", fmt.Errorf("forgejo pod not found")
 	}
 	return pods.Items[0].Name, nil
-}
-
-func (f *ForgejoService) execInPod(ctx context.Context, ns, pod string, command []string) (string, error) {
-	args := append([]string{"exec", "-n", ns, pod, "--"}, command...)
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("kubectl exec failed: %s: %w", string(out), err)
-	}
-	return string(out), nil
 }
 
 // GetReviewURL returns the local browser URL for the repository review in Forgejo.
