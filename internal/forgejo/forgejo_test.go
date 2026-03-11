@@ -52,3 +52,20 @@ func TestStubServiceHasNewCommits(t *testing.T) {
 		t.Errorf("expected ErrNotImplemented, got %v", err)
 	}
 }
+
+func TestForgejoServiceGetReviewURLUsesKagenBranch(t *testing.T) {
+	t.Parallel()
+
+	svc := NewForgejoService(nil, nil, nil)
+	repo := &git.Repository{CurrentBranch: "feature/x"}
+
+	got, err := svc.GetReviewURL(repo)
+	if err != nil {
+		t.Fatalf("GetReviewURL() returned error: %v", err)
+	}
+
+	want := "http://localhost:3000/kagen/workspace/src/branch/kagen%2Ffeature%2Fx"
+	if got != want {
+		t.Fatalf("GetReviewURL() = %q, want %q", got, want)
+	}
+}

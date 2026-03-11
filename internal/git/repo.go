@@ -144,6 +144,16 @@ func (r *Repository) Merge(ctx context.Context, ref string) error {
 	return nil
 }
 
+// MergeFFOnly fast-forwards the current branch to the specified ref.
+func (r *Repository) MergeFFOnly(ctx context.Context, ref string) error {
+	_, err := gitCommand(r.Path, "merge", "--ff-only", ref)
+	if err != nil {
+		return fmt.Errorf("git merge --ff-only %s: %w", ref, err)
+	}
+
+	return nil
+}
+
 // HasUncommittedChanges checks if there are uncommitted changes in the worktree.
 func (r *Repository) HasUncommittedChanges() bool {
 	out, err := gitCommand(r.Path, "status", "--porcelain")

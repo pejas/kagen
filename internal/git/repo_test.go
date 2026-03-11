@@ -73,6 +73,41 @@ func TestKagenBranch(t *testing.T) {
 	}
 }
 
+func TestMergeFFOnly(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	runGit(t, dir, "checkout", "-b", "feature")
+	runGit(t, dir, "checkout", "-b", "kagen/feature")
+	writeFile(t, filepath.Join(dir, "review.txt"), "reviewed\n")
+	runGit(t, dir, "add", "review.txt")
+	runGit(t, dir, "commit", "-m", "reviewed change")
+	runGit(t, dir, "checkout", "feature")
+
+	repo, err := Discover(dir)
+	if err != nil {
+		t.Fatalf("Discover() returned error: %v", err)
+	}
+
+	if err := repo.MergeFFOnly(t.Context(), repo.KagenBranch()); err != nil {
+		t.Fatalf("MergeFFOnly() returned error: %v", err)
+	}
+
+	head, err := gitCommand(dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD returned error: %v", err)
+	}
+	branchHead, err := gitCommand(dir, "rev-parse", repo.KagenBranch())
+	if err != nil {
+		t.Fatalf("git rev-parse %s returned error: %v", repo.KagenBranch(), err)
+	}
+	if head != branchHead {
+		t.Fatalf("HEAD = %q, want %q", head, branchHead)
+	}
+}
+
 // initGitRepo creates a minimal git repo with one commit in dir.
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -88,5 +123,23 @@ func initGitRepo(t *testing.T, dir string) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v failed: %v\n%s", args, err, out)
 		}
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) failed: %v", path, err)
 	}
 }

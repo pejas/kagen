@@ -61,16 +61,16 @@ func runPull(cmd *cobra.Command, _ []string) error {
 	}
 
 	// 6. Fetch and Merge
-	ui.Info("Fetching changes from kagen/%s...", repo.CurrentBranch)
+	ui.Info("Fetching changes from %s...", repo.KagenBranch())
 	if err := repo.Fetch(ctx, "kagen"); err != nil {
 		return fmt.Errorf("fetching from forgejo: %w", err)
 	}
 
-	ui.Info("Merging changes into %s...", repo.CurrentBranch)
-	if err := repo.Merge(ctx, "kagen/"+repo.CurrentBranch); err != nil {
-		return fmt.Errorf("merging changes: %w", err)
+	ui.Info("Fast-forwarding %s from %s...", repo.CurrentBranch, repo.KagenBranch())
+	if err := repo.MergeFFOnly(ctx, repo.KagenBranch()); err != nil {
+		return fmt.Errorf("fast-forwarding changes: %w", err)
 	}
 
-	ui.Success("Successfully pulled and merged reviewed changes.")
+	ui.Success("Successfully fast-forwarded reviewed changes.")
 	return nil
 }

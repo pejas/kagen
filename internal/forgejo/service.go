@@ -3,6 +3,7 @@ package forgejo
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/git"
@@ -30,7 +31,10 @@ func NewForgejoService(client *kubernetes.Clientset, pf cluster.PortForwarder, e
 
 // GetReviewURL returns the local browser URL for the repository review in Forgejo.
 func (f *ForgejoService) GetReviewURL(repo *git.Repository) (string, error) {
-	return fmt.Sprintf("http://localhost:3000/kagen/workspace/src/branch/%s", repo.CurrentBranch), nil
+	return fmt.Sprintf(
+		"http://localhost:3000/kagen/workspace/src/branch/%s",
+		url.PathEscape(repo.KagenBranch()),
+	), nil
 }
 
 // HasNewCommits checks if there are commits in Forgejo not yet pulled local.
