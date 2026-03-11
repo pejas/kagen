@@ -128,6 +128,10 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 
 	// 5.1 Parse Devfile for resource generation.
 	devfilePath := "devfile.yaml"
+	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
+		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
+	}
+
 	d, err := devfile.Parse(devfilePath)
 	if err != nil {
 		return fmt.Errorf("parsing devfile: %w", err)
