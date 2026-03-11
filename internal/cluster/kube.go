@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pejas/kagen/internal/devfile"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/proxy"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,7 +66,7 @@ func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository)
 }
 
 // EnsureResources orchestrates the PVCs and Pod for the repository.
-func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile) error {
+func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile, policy *proxy.Policy) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 
 	// 1. Generate Pod spec.
@@ -75,7 +77,7 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 	}
 	pod.Labels["kagen.io/repo-id"] = repo.ID()
 	injectWorkspaceSync(pod, repo)
-	injectAgentRuntime(pod, agentType)
+	injectAgentRuntime(pod, agentType, nsName, policy)
 
 	// 2. Ensure PVCs (Stage 3 focuses on simple PVC existence).
 	// For this stage, we assume PVCs mentioned in devfile volumes are handled or we create simple ones.
@@ -120,9 +122,13 @@ git checkout %q 2>/dev/null || git checkout -b %q "origin/%s"
 	})
 }
 
-func injectAgentRuntime(pod *corev1.Pod, agentType string) {
+func injectAgentRuntime(pod *corev1.Pod, agentType, namespace string, policy *proxy.Policy) {
 	if len(pod.Spec.Containers) == 0 {
 		return
+	}
+
+	if proxyEnabled(policy) {
+		injectProxyEnv(&pod.Spec.Containers[0], namespace)
 	}
 
 	switch agentType {
@@ -133,6 +139,34 @@ func injectAgentRuntime(pod *corev1.Pod, agentType string) {
 		)
 	default:
 	}
+}
+
+func proxyEnabled(policy *proxy.Policy) bool {
+	return policy != nil && len(policy.AllowedDestinations) > 0
+}
+
+func injectProxyEnv(container *corev1.Container, namespace string) {
+	proxyURL := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", proxyServiceName, namespace, proxyPort)
+	noProxy := strings.Join([]string{
+		"127.0.0.1",
+		"localhost",
+		".svc",
+		".svc.cluster.local",
+		"forgejo",
+		fmt.Sprintf("forgejo.%s.svc.cluster.local", namespace),
+		fmt.Sprintf("%s.%s.svc.cluster.local", proxyServiceName, namespace),
+	}, ",")
+
+	container.Env = append(container.Env,
+		corev1.EnvVar{Name: "HTTP_PROXY", Value: proxyURL},
+		corev1.EnvVar{Name: "HTTPS_PROXY", Value: proxyURL},
+		corev1.EnvVar{Name: "ALL_PROXY", Value: proxyURL},
+		corev1.EnvVar{Name: "http_proxy", Value: proxyURL},
+		corev1.EnvVar{Name: "https_proxy", Value: proxyURL},
+		corev1.EnvVar{Name: "all_proxy", Value: proxyURL},
+		corev1.EnvVar{Name: "NO_PROXY", Value: noProxy},
+		corev1.EnvVar{Name: "no_proxy", Value: noProxy},
+	)
 }
 
 // AttachAgent connects the current terminal to the agent process.

@@ -41,8 +41,12 @@ func Validate(cfg *Config) error {
 	}
 
 	for _, dest := range cfg.ProxyAllowlist {
-		if strings.TrimSpace(dest) == "" {
+		dest = strings.TrimSpace(dest)
+		if dest == "" {
 			return fmt.Errorf("proxy_allowlist cannot contain empty values")
+		}
+		if strings.Contains(dest, "://") || strings.Contains(dest, "/") {
+			return fmt.Errorf("proxy_allowlist entries must be hostnames without scheme or path: %q", dest)
 		}
 	}
 

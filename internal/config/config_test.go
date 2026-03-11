@@ -130,3 +130,14 @@ func TestValidateRejectsInvalidRuntime(t *testing.T) {
 		t.Fatal("Validate() expected error for invalid startup timeout")
 	}
 }
+
+func TestValidateRejectsProxyAllowlistURLs(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.ProxyAllowlist = []string{"https://api.openai.com/v1"}
+
+	if err := Validate(cfg); err == nil {
+		t.Fatal("Validate() expected error for proxy allowlist URL")
+	}
+}

@@ -3,27 +3,30 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 const (
 	proxyDeploymentName = "egress-proxy"
+	proxyServiceName    = "egress-proxy"
+	proxyPolicyName     = "egress-proxy-egress"
 	proxyConfigMapName  = "egress-proxy-config"
 	proxyImage          = "docker.io/alpine:3.22"
+	proxyPort           = 8888
 )
 
-// EnsureProxy reconciles the repo-scoped proxy metadata and readiness anchor.
-//
-// This creates a namespaced ConfigMap for the allowlist and a lightweight
-// Deployment that represents proxy enforcement state until traffic steering is
-// wired through the agent pod.
+// EnsureProxy reconciles the repo-scoped proxy workload, service, and egress policy.
 func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 	if policy == nil || len(policy.AllowedDestinations) == 0 {
@@ -33,7 +36,16 @@ func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, pol
 	if err := k.ensureProxyConfig(ctx, nsName, repo.ID(), policy); err != nil {
 		return err
 	}
+	if err := k.ensureProxyService(ctx, nsName, repo.ID()); err != nil {
+		return err
+	}
 	if err := k.ensureProxyDeployment(ctx, nsName, repo.ID()); err != nil {
+		return err
+	}
+	if err := k.ensureAgentNetworkPolicy(ctx, nsName, repo.ID()); err != nil {
+		return err
+	}
+	if err := k.waitForProxyReady(ctx, nsName); err != nil {
 		return err
 	}
 
@@ -41,6 +53,12 @@ func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, pol
 }
 
 func (k *KubeManager) deleteProxyResources(ctx context.Context, namespace string) error {
+	if err := k.client.NetworkingV1().NetworkPolicies(namespace).Delete(ctx, proxyPolicyName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("deleting proxy networkpolicy: %w", err)
+	}
+	if err := k.client.CoreV1().Services(namespace).Delete(ctx, proxyServiceName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("deleting proxy service: %w", err)
+	}
 	if err := k.client.AppsV1().Deployments(namespace).Delete(ctx, proxyDeploymentName, metav1.DeleteOptions{}); err != nil && !k8serrors.IsNotFound(err) {
 		return fmt.Errorf("deleting proxy deployment: %w", err)
 	}
@@ -76,7 +94,8 @@ func (k *KubeManager) ensureProxyConfig(ctx context.Context, namespace, repoID s
 			},
 		},
 		Data: map[string]string{
-			"allowlist.txt": strings.Join(policy.AllowedDestinations, "\n"),
+			"allowlist":      proxyAllowlist(policy.AllowedDestinations),
+			"tinyproxy.conf": tinyproxyConfig(),
 		},
 	}
 
@@ -100,6 +119,44 @@ func (k *KubeManager) ensureProxyConfig(ctx context.Context, namespace, repoID s
 	}
 
 	return nil
+}
+
+func tinyproxyConfig() string {
+	return fmt.Sprintf(`Port %d
+Timeout 600
+LogLevel Info
+LogFile "/dev/stdout"
+PidFile "/tmp/tinyproxy.pid"
+MaxClients 100
+StartServers 2
+MinSpareServers 1
+MaxSpareServers 5
+DisableViaHeader Yes
+ConnectPort 80
+ConnectPort 443
+ConnectPort 22
+Filter "/etc/tinyproxy/allowlist"
+FilterURLs On
+FilterDefaultDeny Yes
+`, proxyPort)
+}
+
+func proxyAllowlist(destinations []string) string {
+	patterns := make([]string, 0, len(destinations)*2)
+	for _, destination := range destinations {
+		host := strings.TrimSpace(destination)
+		if host == "" {
+			continue
+		}
+
+		escaped := regexp.QuoteMeta(host)
+		patterns = append(patterns,
+			fmt.Sprintf("^https?://%s(:[0-9]+)?/", escaped),
+			fmt.Sprintf("^%s(:[0-9]+)?$", escaped),
+		)
+	}
+
+	return strings.Join(patterns, "\n")
 }
 
 func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repoID string) error {
@@ -133,12 +190,27 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 							Image:   proxyImage,
 							Command: []string{"/bin/sh", "-lc"},
 							Args: []string{
-								"echo 'proxy reconciliation anchor active'; trap : TERM INT; while true; do sleep 3600; done",
+								`set -eu
+apk add --no-cache tinyproxy >/dev/null
+exec tinyproxy -d -c /etc/tinyproxy/tinyproxy.conf`,
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "http",
+									ContainerPort: proxyPort,
+								},
+							},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									TCPSocket: &corev1.TCPSocketAction{
+										Port: intstr.FromInt(proxyPort),
+									},
+								},
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      "config",
-									MountPath: "/etc/kagen-proxy",
+									MountPath: "/etc/tinyproxy",
 									ReadOnly:  true,
 								},
 							},
@@ -184,6 +256,196 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 	return nil
 }
 
+func (k *KubeManager) ensureProxyService(ctx context.Context, namespace, repoID string) error {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      proxyServiceName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name": "kagen-proxy",
+				"kagen.io/repo-id":       repoID,
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app.kubernetes.io/name": "kagen-proxy",
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "http",
+					Port:       proxyPort,
+					TargetPort: intstr.FromInt(proxyPort),
+				},
+			},
+		},
+	}
+
+	_, err := k.client.CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
+	if err == nil {
+		return nil
+	}
+	if !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating proxy service: %w", err)
+	}
+
+	current, err := k.client.CoreV1().Services(namespace).Get(ctx, proxyServiceName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting proxy service: %w", err)
+	}
+
+	current.Labels = service.Labels
+	current.Spec.Ports = service.Spec.Ports
+	current.Spec.Selector = service.Spec.Selector
+	if _, err := k.client.CoreV1().Services(namespace).Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("updating proxy service: %w", err)
+	}
+
+	return nil
+}
+
+func (k *KubeManager) ensureAgentNetworkPolicy(ctx context.Context, namespace, repoID string) error {
+	policy := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      proxyDeploymentName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/name": "kagen-proxy",
+				"kagen.io/repo-id":       repoID,
+			},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app.kubernetes.io/name": "kagen-agent",
+				},
+			},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeEgress,
+			},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				{
+					To: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app.kubernetes.io/name": "kagen-proxy",
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: tcpProtocol(),
+							Port:     intStrPtr(proxyPort),
+						},
+					},
+				},
+				{
+					To: []networkingv1.NetworkPolicyPeer{
+						{
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"app": "forgejo",
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: tcpProtocol(),
+							Port:     intStrPtr(3000),
+						},
+						{
+							Protocol: tcpProtocol(),
+							Port:     intStrPtr(22),
+						},
+					},
+				},
+				{
+					To: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "kube-system",
+								},
+							},
+							PodSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"k8s-app": "kube-dns",
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{
+							Protocol: udpProtocol(),
+							Port:     intStrPtr(53),
+						},
+						{
+							Protocol: tcpProtocol(),
+							Port:     intStrPtr(53),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := k.client.NetworkingV1().NetworkPolicies(namespace).Create(ctx, policy, metav1.CreateOptions{})
+	if err == nil {
+		return nil
+	}
+	if !k8serrors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating proxy networkpolicy: %w", err)
+	}
+
+	current, err := k.client.NetworkingV1().NetworkPolicies(namespace).Get(ctx, proxyPolicyName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("getting proxy networkpolicy: %w", err)
+	}
+
+	current.Labels = policy.Labels
+	current.Spec = policy.Spec
+	if _, err := k.client.NetworkingV1().NetworkPolicies(namespace).Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("updating proxy networkpolicy: %w", err)
+	}
+
+	return nil
+}
+
+func (k *KubeManager) waitForProxyReady(ctx context.Context, namespace string) error {
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			deployment, err := k.client.AppsV1().Deployments(namespace).Get(ctx, proxyDeploymentName, metav1.GetOptions{})
+			if err == nil && deployment.Status.ReadyReplicas > 0 {
+				return nil
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for proxy deployment %s/%s to become ready", namespace, proxyDeploymentName)
+}
+
 func int32Ptr(value int32) *int32 {
 	return &value
+}
+
+func intStrPtr(value int) *intstr.IntOrString {
+	intValue := intstr.FromInt(value)
+	return &intValue
+}
+
+func tcpProtocol() *corev1.Protocol {
+	protocol := corev1.ProtocolTCP
+	return &protocol
+}
+
+func udpProtocol() *corev1.Protocol {
+	protocol := corev1.ProtocolUDP
+	return &protocol
 }

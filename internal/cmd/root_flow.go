@@ -131,7 +131,7 @@ func ensureClusterResources(
 	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
 		return fmt.Errorf("ensuring proxy: %w", err)
 	}
-	if err := manager.EnsureResources(ctx, repo, string(agentType), d); err != nil {
+	if err := manager.EnsureResources(ctx, repo, string(agentType), d, policy); err != nil {
 		return fmt.Errorf("ensuring resources: %w", err)
 	}
 

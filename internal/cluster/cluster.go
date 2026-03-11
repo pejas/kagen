@@ -17,7 +17,7 @@ type Manager interface {
 	EnsureNamespace(ctx context.Context, repo *git.Repository) error
 
 	// EnsureResources orchestrates the PVCs, Pod, and other resources for the repository.
-	EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile) error
+	EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile, policy *proxy.Policy) error
 
 	// EnsureProxy reconciles the namespace-scoped proxy resources for the repository.
 	EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy) error
@@ -49,7 +49,7 @@ func (s *StubManager) EnsureNamespace(_ context.Context, _ *git.Repository) erro
 	return fmt.Errorf("ensure namespace: %w", kagerr.ErrNotImplemented)
 }
 
-func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ string, _ *devfile.Devfile) error {
+func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ string, _ *devfile.Devfile, _ *proxy.Policy) error {
 	return fmt.Errorf("ensure resources: %w", kagerr.ErrNotImplemented)
 }
 
