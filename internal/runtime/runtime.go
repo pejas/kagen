@@ -37,6 +37,9 @@ type Manager interface {
 	// EnsureRunning starts the runtime if it is not already running.
 	EnsureRunning(ctx context.Context) error
 
+	// Stop shuts down the runtime if it is currently running.
+	Stop(ctx context.Context) error
+
 	// Status returns the current runtime status.
 	Status(ctx context.Context) (Status, error)
 
@@ -55,6 +58,11 @@ func (s *StubManager) EnsureRunning(_ context.Context) error {
 // Status returns ErrNotImplemented.
 func (s *StubManager) Status(_ context.Context) (Status, error) {
 	return StatusUnknown, fmt.Errorf("runtime status: %w", kagerr.ErrNotImplemented)
+}
+
+// Stop returns ErrNotImplemented.
+func (s *StubManager) Stop(_ context.Context) error {
+	return fmt.Errorf("runtime stop: %w", kagerr.ErrNotImplemented)
 }
 
 // KubeContext returns a dummy context for the stub.

@@ -13,6 +13,7 @@ type Registry struct {
 	kubeCtx string
 
 	containerName string
+	statePath     string
 }
 
 // NewRegistry creates a Registry for the given context.
@@ -31,15 +32,23 @@ func (r *Registry) WithContainer(name string) *Registry {
 	return &clone
 }
 
+// WithStatePath returns a copy of the registry that targets the provided
+// per-agent-session runtime state path during attach.
+func (r *Registry) WithStatePath(path string) *Registry {
+	clone := *r
+	clone.statePath = path
+	return &clone
+}
+
 // Get returns the agent for the given type, or ErrAgentUnknown if not found.
 func (r *Registry) Get(agentType Type) (Agent, error) {
 	switch agentType {
 	case Claude:
-		return NewClaudeAgent(r.repo, r.kubeCtx, r.containerName), nil
+		return NewClaudeAgent(r.repo, r.kubeCtx, r.containerName, r.statePath), nil
 	case Codex:
-		return NewCodexAgent(r.repo, r.kubeCtx, r.containerName), nil
+		return NewCodexAgent(r.repo, r.kubeCtx, r.containerName, r.statePath), nil
 	case OpenCode:
-		return NewOpenCodeAgent(r.repo, r.kubeCtx, r.containerName), nil
+		return NewOpenCodeAgent(r.repo, r.kubeCtx, r.containerName, r.statePath), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", kagerr.ErrAgentUnknown, agentType)
 	}

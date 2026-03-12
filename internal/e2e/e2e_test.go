@@ -15,8 +15,6 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	"github.com/pejas/kagen/internal/agent"
-	"github.com/pejas/kagen/internal/devfile"
 )
 
 type testContext struct {
@@ -126,7 +124,7 @@ func (c *testContext) theFileShouldExist(filename string) error {
 }
 
 func (c *testContext) theOutputShouldContain(expected string) error {
-	// Support simple regex-like matching for paths (e.g. "Created ... devfile.yaml")
+	// Support simple regex-like matching for paths (e.g. "Wrote ... .kagen.yaml")
 	parts := strings.Split(expected, "...")
 	allFound := true
 	for _, part := range parts {
@@ -149,10 +147,11 @@ func (c *testContext) theFileDoesNotExist(filename string) error {
 
 func (c *testContext) theFileExists(filename string) error {
 	path := filepath.Join(c.tmpDir, filename)
-	content, err := devfile.DefaultForAgent(agent.Codex)
-	if err != nil {
-		return err
+	content := "placeholder\n"
+	if filename == ".kagen.yaml" {
+		content = "agent: codex\n"
 	}
+
 	return os.WriteFile(path, []byte(content), 0644)
 }
 

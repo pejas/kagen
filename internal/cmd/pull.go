@@ -55,7 +55,7 @@ func runPull(cmd *cobra.Command, _ []string) error {
 
 	// 5. Start port-forward to Forgejo to resolve remote URL
 	ui.Info("Connecting to in-cluster Forgejo...")
-	localPort, err := pf.Start(ctx, fmt.Sprintf("kagen-%s", repo.ID()), "svc/forgejo", 3000)
+	localPort, err := pf.Start(ctx, fmt.Sprintf("kagen-%s", repo.ID()), "svc/forgejo", 0, 3000)
 	if err != nil {
 		return fmt.Errorf("starting port-forward: %w", err)
 	}

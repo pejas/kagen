@@ -143,7 +143,7 @@ func (r *Repository) PushRefspecs(ctx context.Context, remote string, refspecs .
 	args := []string{"push", "-f", remote}
 	args = append(args, refspecs...)
 
-	_, err := gitCommand(r.Path, args...)
+	_, err := gitCommandContext(ctx, r.Path, args...)
 	if err != nil {
 		return fmt.Errorf("git push %s %s: %w", remote, strings.Join(refspecs, " "), err)
 	}
@@ -169,7 +169,7 @@ func (r *Repository) HasRef(ref string) bool {
 
 // Fetch fetches from the specified remote.
 func (r *Repository) Fetch(ctx context.Context, remote string) error {
-	_, err := gitCommand(r.Path, "fetch", remote)
+	_, err := gitCommandContext(ctx, r.Path, "fetch", remote)
 	if err != nil {
 		return fmt.Errorf("git fetch %s: %w", remote, err)
 	}
@@ -178,7 +178,7 @@ func (r *Repository) Fetch(ctx context.Context, remote string) error {
 
 // Merge merges the specified ref into the current branch.
 func (r *Repository) Merge(ctx context.Context, ref string) error {
-	_, err := gitCommand(r.Path, "merge", "--no-edit", ref)
+	_, err := gitCommandContext(ctx, r.Path, "merge", "--no-edit", ref)
 	if err != nil {
 		return fmt.Errorf("git merge %s: %w", ref, err)
 	}
@@ -187,7 +187,7 @@ func (r *Repository) Merge(ctx context.Context, ref string) error {
 
 // MergeFFOnly fast-forwards the current branch to the specified ref.
 func (r *Repository) MergeFFOnly(ctx context.Context, ref string) error {
-	_, err := gitCommand(r.Path, "merge", "--ff-only", ref)
+	_, err := gitCommandContext(ctx, r.Path, "merge", "--ff-only", ref)
 	if err != nil {
 		return fmt.Errorf("git merge --ff-only %s: %w", ref, err)
 	}
@@ -220,6 +220,22 @@ func (r *Repository) Commit(message string) error {
 // gitCommand runs a git command in the given directory and returns stdout.
 func gitCommand(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), string(out), err)
+	}
+
+	return string(out), nil
+}
+
+func gitCommandContext(ctx context.Context, dir string, args ...string) (string, error) {
+	if ctx == nil {
+		return gitCommand(dir, args...)
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 
 	out, err := cmd.CombinedOutput()

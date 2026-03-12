@@ -16,8 +16,9 @@ GO       := go
 GOFLAGS  := -trimpath
 GOTEST   := $(GO) test
 GOLINT   := golangci-lint
+TEST_PKGS := $(shell $(GO) list ./... | grep -v '/internal/e2e$$')
 
-.PHONY: all build test lint clean install help
+.PHONY: all build test test-e2e lint clean install help
 
 all: build
 
@@ -25,9 +26,13 @@ all: build
 build:
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(APP_NAME) ./$(BUILD_DIR)
 
-## test: run all tests with race detector
+## test: run unit and integration tests with race detector (excluding internal/e2e)
 test: build
-	$(GOTEST) -race -count=1 -v ./...
+	$(GOTEST) -race -count=1 -v $(TEST_PKGS)
+
+## test-e2e: run the end-to-end suite explicitly
+test-e2e: build
+	$(GOTEST) -race -count=1 -v ./internal/e2e
 
 ## lint: run golangci-lint
 lint:

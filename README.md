@@ -6,11 +6,15 @@
 Kagen is a local, security-first agent runtime for Git repositories.
 
 ## Why
-It isolates AI agents from your host system and the internet. The agent's execution environment is defined by a repository `devfile.yaml`, and Kagen provisions the selected agent runtime inside the Colima VM so the host checkout remains outside the execution boundary.
+It isolates AI agents from your host system and the internet. Kagen generates the runtime workload internally and provisions the selected agent inside the Colima VM so the host checkout remains outside the execution boundary.
 
 Changes made by the agent are accumulated in an isolated, in-cluster Forgejo instance. This provides a clear, reviewable boundary before any code is pulled back into your canonical local branch.
 
 ## How
+
+Quick docs:
+- [Internals Blueprint](docs/INTERNALS-BLUEPRINT.md)
+- [Architecture](docs/ARCHITECTURE.md)
 
 ### Installation
 
@@ -24,30 +28,40 @@ make install
 
 ### Usage
 
-Initialize the environment for Codex (writes a Codex-ready `devfile.yaml` and `.kagen.yaml`):
+Write optional repository defaults for Codex (not required before `start` or `attach`):
 
 ```bash
-kagen init
+kagen config write
 ```
 
-Rewrite an older placeholder project template with the real Codex runtime:
+Rewrite the optional project config with a different default agent:
 
 ```bash
-kagen init --agent codex --force
+kagen config write --agent codex --force
 ```
 
-Start or resume a session:
+Start a new session:
 
 ```bash
-kagen
+kagen start codex
 ```
 
-Launch a specific agent directly:
+Attach a new agent session to the most recent ready kagen session for the current repository:
 
 ```bash
-kagen --agent claude
-kagen --agent codex
-kagen --agent opencode
+kagen attach codex
+```
+
+List persisted sessions for the current repository:
+
+```bash
+kagen list
+```
+
+Shut down the whole local Kagen runtime environment:
+
+```bash
+kagen down
 ```
 
 For Codex, Kagen now:
@@ -55,6 +69,10 @@ For Codex, Kagen now:
 - clones that repository into `/projects/workspace` inside the agent pod,
 - persists Codex state in a dedicated PVC mounted at `/home/kagen/.codex`,
 - launches Codex with `danger-full-access` and `never` approval mode inside the VM, not on the host.
+
+Existing repository `devfile.yaml` files are treated as legacy repository artefacts: `kagen config write` does not create them, and `kagen start` and `kagen attach` ignore them.
+
+Leaving an agent TUI with `/exit` or `/quit` only detaches from that tool. `kagen config write` only writes optional repo defaults. `kagen down` stops the whole local Colima/K3s runtime environment, while persisted kagen sessions and agent sessions remain in the local store and continue to appear in `kagen list`.
 
 Enable verbose output:
 
@@ -87,3 +105,11 @@ Run tests:
 ```bash
 make test
 ```
+
+Run the end-to-end suite explicitly:
+
+```bash
+make test-e2e
+```
+
+`make test` intentionally excludes `internal/e2e` so the default validation loop stays fast and does not require the full local runtime stack. Use `make test-e2e` when you specifically want end-to-end coverage.

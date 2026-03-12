@@ -31,6 +31,16 @@ func TestStubManagerStatus(t *testing.T) {
 	}
 }
 
+func TestStubManagerStop(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewStubManager()
+	err := mgr.Stop(context.Background())
+	if !errors.Is(err, kagerr.ErrNotImplemented) {
+		t.Errorf("expected ErrNotImplemented, got %v", err)
+	}
+}
+
 func TestStatusString(t *testing.T) {
 	t.Parallel()
 

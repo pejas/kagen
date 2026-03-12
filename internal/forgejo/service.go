@@ -3,9 +3,12 @@ package forgejo
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/pejas/kagen/internal/cluster"
+	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/kubeexec"
 	"k8s.io/client-go/kubernetes"
@@ -13,12 +16,14 @@ import (
 
 // ForgejoService implements the Service interface using client-go.
 type ForgejoService struct {
-	client *kubernetes.Clientset
-	pf     cluster.PortForwarder
-	exec   kubeexec.Runner
+	client     *kubernetes.Clientset
+	pf         cluster.PortForwarder
+	exec       kubeexec.Runner
+	httpClient *http.Client
 }
 
 const forgejoConfigPath = "/etc/gitea/app.ini"
+const forgejoHTTPTimeout = 2 * time.Second
 
 // NewForgejoService returns a new ForgejoService.
 func NewForgejoService(client *kubernetes.Clientset, pf cluster.PortForwarder, execRunner kubeexec.Runner) *ForgejoService {
@@ -26,6 +31,9 @@ func NewForgejoService(client *kubernetes.Clientset, pf cluster.PortForwarder, e
 		client: client,
 		pf:     pf,
 		exec:   execRunner,
+		httpClient: &http.Client{
+			Timeout: forgejoHTTPTimeout,
+		},
 	}
 }
 
@@ -39,5 +47,5 @@ func (f *ForgejoService) GetReviewURL(repo *git.Repository) (string, error) {
 
 // HasNewCommits checks if there are commits in Forgejo not yet pulled local.
 func (f *ForgejoService) HasNewCommits(ctx context.Context, repo *git.Repository) (bool, error) {
-	return false, nil
+	return false, fmt.Errorf("forgejo has new commits: %w", kagerr.ErrNotImplemented)
 }

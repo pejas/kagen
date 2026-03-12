@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pejas/kagen/internal/git"
@@ -17,6 +18,7 @@ type baseAgent struct {
 	repo          *git.Repository
 	kubeCtx       string
 	containerName string
+	statePath     string
 	spec          RuntimeSpec
 	exec          kubeexec.Runner
 }
@@ -63,11 +65,16 @@ func (b *baseAgent) Attach(ctx context.Context) error {
 }
 
 func (b *baseAgent) commandArgs() []string {
-	return []string{"/bin/sh", "-lc", b.spec.AttachShell}
+	shell := b.spec.AttachShell
+	if strings.TrimSpace(b.statePath) != "" {
+		shell = b.spec.AttachShellForStatePath(b.statePath)
+	}
+
+	return []string{"/bin/sh", "-lc", shell}
 }
 
 func (b *baseAgent) waitForRuntime(ctx context.Context, namespace string) error {
-	for i := 0; i < 90; i++ {
+	for range 90 {
 		command := []string{
 			"/bin/sh", "-lc",
 			b.spec.ReadyCheck(),
@@ -87,7 +94,7 @@ func (b *baseAgent) waitForRuntime(ctx context.Context, namespace string) error 
 }
 
 // NewClaudeAgent returns a real Claude agent.
-func NewClaudeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+func NewClaudeAgent(repo *git.Repository, kubeCtx, containerName, statePath string) Agent {
 	spec, _ := SpecFor(Claude)
 	return &baseAgent{
 		agentType:     Claude,
@@ -95,13 +102,14 @@ func NewClaudeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
 		repo:          repo,
 		kubeCtx:       kubeCtx,
 		containerName: containerName,
+		statePath:     statePath,
 		spec:          spec,
 		exec:          kubeexec.NewRunner(kubeCtx),
 	}
 }
 
 // NewCodexAgent returns a real Codex agent.
-func NewCodexAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+func NewCodexAgent(repo *git.Repository, kubeCtx, containerName, statePath string) Agent {
 	spec, _ := SpecFor(Codex)
 	return &baseAgent{
 		agentType:     Codex,
@@ -109,13 +117,14 @@ func NewCodexAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
 		repo:          repo,
 		kubeCtx:       kubeCtx,
 		containerName: containerName,
+		statePath:     statePath,
 		spec:          spec,
 		exec:          kubeexec.NewRunner(kubeCtx),
 	}
 }
 
 // NewOpenCodeAgent returns a real OpenCode agent.
-func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName string) Agent {
+func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName, statePath string) Agent {
 	spec, _ := SpecFor(OpenCode)
 	return &baseAgent{
 		agentType:     OpenCode,
@@ -123,6 +132,7 @@ func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName string) Agent
 		repo:          repo,
 		kubeCtx:       kubeCtx,
 		containerName: containerName,
+		statePath:     statePath,
 		spec:          spec,
 		exec:          kubeexec.NewRunner(kubeCtx),
 	}

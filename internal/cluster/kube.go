@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pejas/kagen/internal/agent"
-	"github.com/pejas/kagen/internal/devfile"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
 	corev1 "k8s.io/api/core/v1"
@@ -68,32 +67,23 @@ func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository)
 }
 
 // EnsureResources orchestrates the PVCs and Pod for the repository.
-func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile, policy *proxy.Policy) error {
+func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository, agentType string, pod *corev1.Pod, policy *proxy.Policy) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
-
-	// 1. Generate Pod spec.
-	gen := &devfile.Generator{Namespace: nsName}
-	pod, err := gen.GeneratePod("agent", d)
-	if err != nil {
-		return fmt.Errorf("generating pod spec: %w", err)
-	}
 	pod.Labels["kagen.io/repo-id"] = repo.ID()
 	injectWorkspaceSync(pod, repo)
 	injectAgentRuntime(pod, agentType, nsName, policy)
 
-	// 2. Ensure PVCs (Stage 3 focuses on simple PVC existence).
-	// For this stage, we assume PVCs mentioned in devfile volumes are handled or we create simple ones.
+	// 2. Ensure PVCs for volumes requested by the generated runtime pod.
 	for _, v := range pod.Spec.Volumes {
 		if v.PersistentVolumeClaim != nil {
-			err := k.ensurePVC(ctx, nsName, v.PersistentVolumeClaim.ClaimName)
-			if err != nil {
+			if err := k.ensurePVC(ctx, nsName, v.PersistentVolumeClaim.ClaimName); err != nil {
 				return err
 			}
 		}
 	}
 
 	// 3. Reconcile Pod.
-	_, err = k.client.CoreV1().Pods(nsName).Create(ctx, pod, metav1.CreateOptions{})
+	_, err := k.client.CoreV1().Pods(nsName).Create(ctx, pod, metav1.CreateOptions{})
 	if err == nil {
 		return nil
 	}
@@ -275,10 +265,10 @@ func (k *KubeManager) ensurePVC(ctx context.Context, ns, name string) error {
 		},
 	}
 	_, err := k.client.CoreV1().PersistentVolumeClaims(ns).Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil {
-		// ignore already exists
-		return nil
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating pvc %s/%s: %w", ns, name, err)
 	}
+
 	return nil
 }
 

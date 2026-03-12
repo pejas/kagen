@@ -9,7 +9,6 @@ import (
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/config"
-	"github.com/pejas/kagen/internal/devfile"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
@@ -17,10 +16,15 @@ import (
 	"github.com/pejas/kagen/internal/provenance"
 	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/runtime"
+	"github.com/pejas/kagen/internal/session"
 	"github.com/pejas/kagen/internal/ui"
+	"github.com/pejas/kagen/internal/workload"
+	corev1 "k8s.io/api/core/v1"
 )
 
-const devfilePath = "devfile.yaml"
+const (
+	runtimePodName = "agent"
+)
 
 func rootContext(ctx context.Context) context.Context {
 	if ctx != nil {
@@ -55,34 +59,6 @@ func loadRunConfig() (*config.Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func loadProjectDevfile(agentType agent.Type) (*devfile.Devfile, error) {
-	if err := ensureProjectDevfileExists(); err != nil {
-		return nil, err
-	}
-
-	d, err := devfile.Parse(devfilePath)
-	if err != nil {
-		return nil, fmt.Errorf("parsing devfile: %w", err)
-	}
-	spec, err := agent.SpecFor(agentType)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := devfile.EnsureRuntimeComponent(d, spec); err != nil {
-		return nil, fmt.Errorf("ensuring runtime component: %w", err)
-	}
-
-	return d, nil
-}
-
-func ensureProjectDevfileExists() error {
-	if _, err := os.Stat(devfilePath); os.IsNotExist(err) {
-		return fmt.Errorf("devfile.yaml not found: run 'kagen init' to bootstrap this repository")
-	}
-
-	return nil
 }
 
 func ensureRuntime(ctx context.Context, cfg *config.Config) (string, error) {
@@ -129,7 +105,6 @@ func ensureClusterResources(
 	repo *git.Repository,
 	cfg *config.Config,
 	agentType agent.Type,
-	d *devfile.Devfile,
 ) error {
 	ui.Info("Ensuring cluster resources for %s/%s...", agentType, repo.CurrentBranch)
 	manager, err := cluster.NewKubeManager(kubeCtx)
@@ -143,7 +118,11 @@ func ensureClusterResources(
 	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
 		return fmt.Errorf("ensuring proxy: %w", err)
 	}
-	if err := manager.EnsureResources(ctx, repo, string(agentType), d, policy); err != nil {
+	pod, err := buildRuntimePod(repo, cfg, agentType)
+	if err != nil {
+		return err
+	}
+	if err := manager.EnsureResources(ctx, repo, string(agentType), pod, policy); err != nil {
 		return fmt.Errorf("ensuring resources: %w", err)
 	}
 
@@ -173,6 +152,14 @@ func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Reposito
 }
 
 func launchAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type) error {
+	if err := launchAgentRuntime(ctx, repo, kubeCtx, agentType); err != nil {
+		return err
+	}
+
+	return attachAgent(ctx, repo, kubeCtx, agentType, session.AgentSession{})
+}
+
+func launchAgentRuntime(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type) error {
 	spec, err := agent.SpecFor(agentType)
 	if err != nil {
 		return err
@@ -188,5 +175,44 @@ func launchAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agen
 		return fmt.Errorf("launching agent: %w", err)
 	}
 
+	return nil
+}
+
+func attachAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type, agentSession session.AgentSession) error {
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return err
+	}
+
+	registry := agent.NewRegistry(repo, kubeCtx).
+		WithContainer(spec.ContainerName()).
+		WithStatePath(agentSession.StatePath)
+	a, err := registry.Get(agentType)
+	if err != nil {
+		return err
+	}
+
 	return a.Attach(ctx)
+}
+
+func buildRuntimePod(repo *git.Repository, _ *config.Config, agentType agent.Type) (*corev1.Pod, error) {
+	namespace := fmt.Sprintf("kagen-%s", repo.ID())
+
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return nil, err
+	}
+
+	builder := workload.NewBuilder()
+	pod, err := builder.BuildPod(workload.Request{
+		Name:      runtimePodName,
+		Namespace: namespace,
+		Runtime:   spec,
+		Images:    workload.DefaultImages(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("building workload pod: %w", err)
+	}
+
+	return pod, nil
 }

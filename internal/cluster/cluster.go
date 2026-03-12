@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pejas/kagen/internal/devfile"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // Manager defines the interface for cluster resource orchestration.
@@ -17,7 +17,7 @@ type Manager interface {
 	EnsureNamespace(ctx context.Context, repo *git.Repository) error
 
 	// EnsureResources orchestrates the PVCs, Pod, and other resources for the repository.
-	EnsureResources(ctx context.Context, repo *git.Repository, agentType string, d *devfile.Devfile, policy *proxy.Policy) error
+	EnsureResources(ctx context.Context, repo *git.Repository, agentType string, pod *corev1.Pod, policy *proxy.Policy) error
 
 	// EnsureProxy reconciles the namespace-scoped proxy resources for the repository.
 	EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy) error
@@ -32,7 +32,7 @@ type Manager interface {
 // PortForwarder manages a port-forward session to a service or pod.
 type PortForwarder interface {
 	// Start begins the port-forward in the background.
-	Start(ctx context.Context, namespace, target string, port int) (int, error)
+	Start(ctx context.Context, namespace, target string, localPort, remotePort int) (int, error)
 	// Stop terminates the port-forward.
 	Stop() error
 }
@@ -49,7 +49,7 @@ func (s *StubManager) EnsureNamespace(_ context.Context, _ *git.Repository) erro
 	return fmt.Errorf("ensure namespace: %w", kagerr.ErrNotImplemented)
 }
 
-func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ string, _ *devfile.Devfile, _ *proxy.Policy) error {
+func (s *StubManager) EnsureResources(_ context.Context, _ *git.Repository, _ string, _ *corev1.Pod, _ *proxy.Policy) error {
 	return fmt.Errorf("ensure resources: %w", kagerr.ErrNotImplemented)
 }
 

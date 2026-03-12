@@ -17,7 +17,7 @@
 - **Validation**: Add configuration validation in `internal/config/validate.go`; run it before orchestration begins.
 
 ## Orchestration Responsibilities
-- Split host-side orchestration into narrow coordinators (runtime bootstrap, devfile validation, forgejo sync, agent launch) and invoke them from `internal/cmd`.
+- Split host-side orchestration into narrow coordinators (runtime bootstrap, workload generation, forgejo sync, agent launch) and invoke them from `internal/cmd`.
 - Keep `internal/cmd` free of shell-outs; coordinators should call injected services instead.
 
 ## Interfaces, Implementations, and Surface Area

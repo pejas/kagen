@@ -61,6 +61,28 @@ func (c *ColimaManager) EnsureRunning(ctx context.Context) error {
 	return c.waitReady(ctx)
 }
 
+// Stop shuts down Colima if it is currently running.
+func (c *ColimaManager) Stop(ctx context.Context) error {
+	if err := checkColimaDependency(); err != nil {
+		return err
+	}
+
+	status, err := c.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("checking status: %w", err)
+	}
+	if status == StatusStopped {
+		return nil
+	}
+
+	cmd := exec.CommandContext(ctx, "colima", "stop", "--profile", colimaProfile)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("stopping colima: %w (output: %s)", err, string(out))
+	}
+
+	return nil
+}
+
 // Status determined the current state by running 'colima status'.
 func (c *ColimaManager) Status(ctx context.Context) (Status, error) {
 	cmd := exec.CommandContext(ctx, "colima", "status", "--profile", colimaProfile)

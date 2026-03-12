@@ -14,7 +14,6 @@ import (
 	"github.com/pejas/kagen/internal/config"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
-	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/ui"
 )
 
@@ -24,9 +23,6 @@ var (
 	Commit    = "none"
 	BuildDate = "unknown"
 )
-
-// agentFlag holds the --agent flag value.
-var agentFlag string
 
 // verboseFlag holds the --verbose flag value.
 var verboseFlag bool
@@ -41,19 +37,23 @@ and uses an in-cluster Forgejo instance as the review and durability boundary
 for agent work.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE:          runRoot,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return cmd.Help()
+	},
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&agentFlag, "agent", "", "agent to use (claude, codex, opencode)")
 	rootCmd.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "enable verbose output")
 
 	// Bind persistent flags to Viper.
-	_ = viper.BindPFlag("agent", rootCmd.PersistentFlags().Lookup("agent"))
 	_ = viper.BindPFlag("verbose", rootCmd.PersistentFlags().Lookup("verbose"))
 
 	// Register subcommands.
-	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(newStartCommand())
+	rootCmd.AddCommand(newAttachCommand())
+	rootCmd.AddCommand(newDownCommand())
+	rootCmd.AddCommand(newConfigCommand())
+	rootCmd.AddCommand(newListCommand())
 	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(versionCmd)
@@ -72,70 +72,10 @@ func Execute() {
 	}
 }
 
-// runRoot implements the default `kagen` flow: discover repo, ensure runtime,
-// resolve agent, set up cluster resources, import to Forgejo, and attach.
-func runRoot(cmd *cobra.Command, _ []string) error {
-	ctx := rootContext(cmd.Context())
-
-	cfg, err := loadRunConfig()
-	if err != nil {
-		return err
-	}
-
-	repo, err := discoverRepository()
-	if err != nil {
-		return err
-	}
-
-	kubeCtx, err := ensureRuntime(ctx, cfg)
-	if err != nil {
-		return err
-	}
-
-	if err := ensureProjectDevfileExists(); err != nil {
-		return err
-	}
-
-	agentType, err := resolveAgent(repo, kubeCtx, cfg)
-	if err != nil {
-		return err
-	}
-	ui.Info("Agent: %s", agentType)
-	policy := proxy.LoadPolicy(cfg, string(agentType))
-	if verboseFlag && len(policy.AllowedDestinations) > 0 {
-		ui.Info("Required egress hosts: %s", strings.Join(policy.AllowedDestinations, ", "))
-	}
-
-	d, err := loadProjectDevfile(agentType)
-	if err != nil {
-		return err
-	}
-
-	forgejoService, err := newForgejoService(kubeCtx)
-	if err != nil {
-		return err
-	}
-	if err := ensureClusterResources(ctx, kubeCtx, repo, cfg, agentType, d); err != nil {
-		return err
-	}
-	if err := ensureForgejoImport(ctx, forgejoService, repo); err != nil {
-		return err
-	}
-	if err := validateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType); err != nil {
-		return err
-	}
-
-	return launchAgent(ctx, repo, kubeCtx, agentType)
-}
-
-// resolveAgent determines which agent to use from the flag, config, or
+// resolveAgent determines which agent to use from config defaults or the
 // interactive prompt.
 func resolveAgent(repo *git.Repository, kubeCtx string, cfg *config.Config) (agent.Type, error) {
-	// CLI flag takes precedence.
-	source := agentFlag
-	if source == "" {
-		source = cfg.Agent
-	}
+	source := cfg.Agent
 
 	if source != "" {
 		return agent.TypeFromString(source)

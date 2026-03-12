@@ -3,11 +3,17 @@ package agent
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	kagerr "github.com/pejas/kagen/internal/errors"
 )
 
 const defaultHomeDir = "/home/kagen"
+
+type runtimeBootstrap struct {
+	command []string
+	args    []string
+}
 
 // EnvVar defines a required environment variable for a runtime.
 type EnvVar struct {
@@ -17,13 +23,13 @@ type EnvVar struct {
 
 // RuntimeSpec describes how kagen bootstraps and attaches to an agent runtime.
 type RuntimeSpec struct {
-	Type          Type
-	DisplayName   string
-	GitAuthorName string
-	Binary        string
-	NPMPackage    string
-	AttachShell   string
-	RequiredEnv   []EnvVar
+	Type            Type
+	DisplayName     string
+	GitAuthorName   string
+	Binary          string
+	AttachShell     string
+	RequiredEnv     []EnvVar
+	legacyBootstrap runtimeBootstrap
 }
 
 // DefaultHomeDir returns the shared runtime home directory inside the pod.
@@ -40,12 +46,12 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			DisplayName:   "Claude",
 			GitAuthorName: "claude",
 			Binary:        "claude",
-			NPMPackage:    "@anthropic-ai/claude-code",
 			AttachShell:   "cd /projects/workspace && exec claude",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
 				{Name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1"},
 			},
+			legacyBootstrap: npmBootstrap("claude", "@anthropic-ai/claude-code"),
 		}, nil
 	case Codex:
 		return RuntimeSpec{
@@ -53,12 +59,12 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			DisplayName:   "Codex",
 			GitAuthorName: "oai-codex",
 			Binary:        "codex",
-			NPMPackage:    "@openai/codex",
 			AttachShell:   "cd /projects/workspace && exec codex --sandbox danger-full-access -a never",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
 				{Name: "CODEX_HOME", Value: defaultHomeDir + "/.codex"},
 			},
+			legacyBootstrap: npmBootstrap("codex", "@openai/codex"),
 		}, nil
 	case OpenCode:
 		return RuntimeSpec{
@@ -66,11 +72,11 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			DisplayName:   "OpenCode",
 			GitAuthorName: "opencode",
 			Binary:        "opencode",
-			NPMPackage:    "opencode-ai",
 			AttachShell:   "cd /projects/workspace && exec opencode",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
 			},
+			legacyBootstrap: npmBootstrap("opencode", "opencode-ai"),
 		}, nil
 	default:
 		return RuntimeSpec{}, fmt.Errorf("runtime spec for %s: %w", agentType, kagerr.ErrAgentUnknown)
@@ -81,22 +87,21 @@ func (s RuntimeSpec) ContainerName() string {
 	return "kagen-agent-" + string(s.Type)
 }
 
-func (s RuntimeSpec) BootstrapCommand() []string {
+func (s RuntimeSpec) LegacyBootstrapCommand() []string {
+	return cloneStrings(s.legacyBootstrap.command)
+}
+
+func (s RuntimeSpec) LegacyBootstrapArgs() []string {
+	return cloneStrings(s.legacyBootstrap.args)
+}
+
+// Toolbox bootstrap assumes the runtime binary is already present in the image.
+func (s RuntimeSpec) ToolboxBootstrapCommand() []string {
 	return []string{"/bin/sh", "-lc"}
 }
 
-func (s RuntimeSpec) BootstrapArgs() []string {
-	return []string{fmt.Sprintf(`set -eu
-export DEBIAN_FRONTEND=noninteractive
-if ! command -v git >/dev/null 2>&1; then
-  apt-get update
-  apt-get install -y --no-install-recommends git ca-certificates curl ripgrep procps
-  rm -rf /var/lib/apt/lists/*
-fi
-if ! command -v %s >/dev/null 2>&1; then
-  npm install -g %s
-fi
-exec tail -f /dev/null`, s.Binary, s.NPMPackage)}
+func (s RuntimeSpec) ToolboxBootstrapArgs() []string {
+	return []string{"exec tail -f /dev/null"}
 }
 
 func (s RuntimeSpec) ReadyCheck() string {
@@ -111,6 +116,45 @@ func (s RuntimeSpec) RequiredEnvMap() map[string]string {
 	return env
 }
 
+// AttachShellForStatePath returns an attach shell that isolates runtime state
+// under the provided per-agent-session path where supported.
+func (s RuntimeSpec) AttachShellForStatePath(statePath string) string {
+	trimmedStatePath := strings.TrimSpace(statePath)
+	if trimmedStatePath == "" {
+		return s.AttachShell
+	}
+
+	env := s.RequiredEnvMap()
+	env["HOME"] = trimmedStatePath
+	if s.Type == Codex {
+		env["CODEX_HOME"] = trimmedStatePath
+	}
+
+	exports := []string{fmt.Sprintf("mkdir -p %q", trimmedStatePath)}
+	for _, variable := range s.RequiredEnv {
+		value, ok := env[variable.Name]
+		if !ok {
+			continue
+		}
+
+		exports = append(exports, fmt.Sprintf("export %s=%q", variable.Name, value))
+		delete(env, variable.Name)
+	}
+	if homePath, ok := env["HOME"]; ok {
+		exports = append(exports, fmt.Sprintf("export HOME=%q", homePath))
+		delete(env, "HOME")
+	}
+	if codexHome, ok := env["CODEX_HOME"]; ok {
+		exports = append(exports, fmt.Sprintf("export CODEX_HOME=%q", codexHome))
+		delete(env, "CODEX_HOME")
+	}
+	for name, value := range env {
+		exports = append(exports, fmt.Sprintf("export %s=%q", name, value))
+	}
+
+	return strings.Join(append(exports, s.AttachShell), " && ")
+}
+
 // SupportedTypes returns the supported runtime identifiers.
 func SupportedTypes() []Type {
 	return []Type{Claude, Codex, OpenCode}
@@ -121,4 +165,25 @@ func SupportedNames() []string {
 	names := []string{"Claude", "Codex", "OpenCode"}
 	slices.Sort(names)
 	return names
+}
+
+func npmBootstrap(binary, npmPackage string) runtimeBootstrap {
+	return runtimeBootstrap{
+		command: []string{"/bin/sh", "-lc"},
+		args: []string{fmt.Sprintf(`set -eu
+export DEBIAN_FRONTEND=noninteractive
+if ! command -v git >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends git ca-certificates curl ripgrep procps
+  rm -rf /var/lib/apt/lists/*
+fi
+if ! command -v %s >/dev/null 2>&1; then
+  npm install -g %s
+fi
+exec tail -f /dev/null`, binary, npmPackage)},
+	}
+}
+
+func cloneStrings(values []string) []string {
+	return append([]string(nil), values...)
 }

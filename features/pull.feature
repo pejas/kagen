@@ -6,10 +6,9 @@ Feature: Synchronizing Changes
   Background:
     Given colima is running
     And a directory that is a git repository
-    And the file "devfile.yaml" exists
 
   Scenario: Pulling changes with unpushed local work
-    When I run "kagen --agent codex"
+    When I run "kagen start codex"
     Then it should ensure the local runtime is healthy
     And it should import the repository to Forgejo
     And it should attach to the agent "codex"

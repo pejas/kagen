@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -154,6 +155,21 @@ func TestPushRefspecs(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git rev-parse %s failed: %v\n%s", ref, err, out)
 		}
+	}
+}
+
+func TestGitCommandContextHonoursCancellation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := gitCommandContext(ctx, dir, "status", "--short")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("gitCommandContext() error = %v, want %v", err, context.Canceled)
 	}
 }
 

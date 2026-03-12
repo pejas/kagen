@@ -434,11 +434,28 @@ func (k *KubeManager) waitForProxyReady(ctx context.Context, namespace string) e
 			if err == nil && deployment.Status.ReadyReplicas > 0 {
 				return nil
 			}
-			time.Sleep(2 * time.Second)
+			if err != nil && !k8serrors.IsNotFound(err) {
+				return fmt.Errorf("getting proxy deployment: %w", err)
+			}
+			if err := waitForRetry(ctx, 2*time.Second); err != nil {
+				return err
+			}
 		}
 	}
 
 	return fmt.Errorf("timed out waiting for proxy deployment %s/%s to become ready", namespace, proxyDeploymentName)
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func int32Ptr(value int32) *int32 {

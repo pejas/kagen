@@ -69,3 +69,15 @@ func TestForgejoServiceGetReviewURLUsesKagenBranch(t *testing.T) {
 		t.Fatalf("GetReviewURL() = %q, want %q", got, want)
 	}
 }
+
+func TestForgejoServiceHasNewCommitsReturnsNotImplemented(t *testing.T) {
+	t.Parallel()
+
+	svc := NewForgejoService(nil, nil, nil)
+	repo := &git.Repository{Path: "/fake"}
+
+	_, err := svc.HasNewCommits(context.Background(), repo)
+	if !errors.Is(err, kagerr.ErrNotImplemented) {
+		t.Fatalf("expected ErrNotImplemented, got %v", err)
+	}
+}

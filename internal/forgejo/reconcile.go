@@ -150,7 +150,12 @@ func (f *ForgejoService) waitReady(ctx context.Context, ns string) error {
 			if err == nil && dep.Status.ReadyReplicas > 0 {
 				return nil
 			}
-			time.Sleep(2 * time.Second)
+			if err != nil && !errors.IsNotFound(err) {
+				return fmt.Errorf("getting forgejo deployment: %w", err)
+			}
+			if err := sleepContext(ctx, 2*time.Second); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -159,8 +164,11 @@ func (f *ForgejoService) getForgejoPod(ctx context.Context, ns string) (string, 
 	pods, err := f.client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=forgejo",
 	})
-	if err != nil || len(pods.Items) == 0 {
-		return "", fmt.Errorf("forgejo pod not found")
+	if err != nil {
+		return "", fmt.Errorf("listing forgejo pods: %w", err)
+	}
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("forgejo pod not found in namespace %s", ns)
 	}
 
 	return pods.Items[0].Name, nil
