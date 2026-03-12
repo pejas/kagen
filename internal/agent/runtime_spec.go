@@ -17,12 +17,13 @@ type EnvVar struct {
 
 // RuntimeSpec describes how kagen bootstraps and attaches to an agent runtime.
 type RuntimeSpec struct {
-	Type        Type
-	DisplayName string
-	Binary      string
-	NPMPackage  string
-	AttachShell string
-	RequiredEnv []EnvVar
+	Type          Type
+	DisplayName   string
+	GitAuthorName string
+	Binary        string
+	NPMPackage    string
+	AttachShell   string
+	RequiredEnv   []EnvVar
 }
 
 // DefaultHomeDir returns the shared runtime home directory inside the pod.
@@ -35,11 +36,12 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 	switch agentType {
 	case Claude:
 		return RuntimeSpec{
-			Type:        Claude,
-			DisplayName: "Claude",
-			Binary:      "claude",
-			NPMPackage:  "@anthropic-ai/claude-code",
-			AttachShell: "cd /projects/workspace && exec claude",
+			Type:          Claude,
+			DisplayName:   "Claude",
+			GitAuthorName: "claude",
+			Binary:        "claude",
+			NPMPackage:    "@anthropic-ai/claude-code",
+			AttachShell:   "cd /projects/workspace && exec claude",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
 				{Name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1"},
@@ -47,11 +49,12 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 		}, nil
 	case Codex:
 		return RuntimeSpec{
-			Type:        Codex,
-			DisplayName: "Codex",
-			Binary:      "codex",
-			NPMPackage:  "@openai/codex",
-			AttachShell: "cd /projects/workspace && exec codex --sandbox danger-full-access -a never",
+			Type:          Codex,
+			DisplayName:   "Codex",
+			GitAuthorName: "oai-codex",
+			Binary:        "codex",
+			NPMPackage:    "@openai/codex",
+			AttachShell:   "cd /projects/workspace && exec codex --sandbox danger-full-access -a never",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
 				{Name: "CODEX_HOME", Value: defaultHomeDir + "/.codex"},
@@ -59,11 +62,12 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 		}, nil
 	case OpenCode:
 		return RuntimeSpec{
-			Type:        OpenCode,
-			DisplayName: "OpenCode",
-			Binary:      "opencode",
-			NPMPackage:  "opencode-ai",
-			AttachShell: "cd /projects/workspace && exec opencode",
+			Type:          OpenCode,
+			DisplayName:   "OpenCode",
+			GitAuthorName: "opencode",
+			Binary:        "opencode",
+			NPMPackage:    "opencode-ai",
+			AttachShell:   "cd /projects/workspace && exec opencode",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
 			},

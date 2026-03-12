@@ -155,6 +155,9 @@ func injectAgentRuntime(pod *corev1.Pod, agentType, namespace string, policy *pr
 		setContainerEnv(container, variable.Name, variable.Value)
 	}
 
+	// Inject git authorship configuration
+	injectGitAuthorship(container, spec)
+
 	if policyEnabled(policy) {
 		injectProxyEnv(container, namespace)
 	}
@@ -182,6 +185,26 @@ func injectProxyEnv(container *corev1.Container, namespace string) {
 		corev1.EnvVar{Name: "NO_PROXY", Value: noProxy},
 		corev1.EnvVar{Name: "no_proxy", Value: noProxy},
 	)
+}
+
+// injectGitAuthorship configures git author and committer environment variables.
+// Author is the AI agent (for attribution), committer is the human user (for notifications).
+func injectGitAuthorship(container *corev1.Container, spec agent.RuntimeSpec) {
+	// Read host git config for committer info
+	hostUser, err := git.GetHostUser()
+	if err != nil {
+		// If we can't read host config, use reasonable defaults
+		hostUser = &git.UserConfig{Name: "kagen-user", Email: ""}
+	}
+
+	// Build agent author email using subaddressing (RFC 5233)
+	authorEmail := git.AddSubaddress(hostUser.Email, spec.GitAuthorName)
+
+	// Set git environment variables
+	setContainerEnv(container, "GIT_AUTHOR_NAME", spec.GitAuthorName)
+	setContainerEnv(container, "GIT_AUTHOR_EMAIL", authorEmail)
+	setContainerEnv(container, "GIT_COMMITTER_NAME", hostUser.Name)
+	setContainerEnv(container, "GIT_COMMITTER_EMAIL", hostUser.Email)
 }
 
 func runtimeContainer(pod *corev1.Pod, name string) *corev1.Container {
