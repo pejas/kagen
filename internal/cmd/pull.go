@@ -35,6 +35,7 @@ func runPull(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("discovering repository: %w", err)
 	}
+	localBaseSHA := repo.HeadSHA
 
 	// 2. Clear state/WIP protection
 	if repo.HasUncommittedChanges() {
@@ -73,7 +74,7 @@ func runPull(cmd *cobra.Command, _ []string) error {
 
 	mergeRef := repo.KagenRemoteTrackingBranch("kagen")
 	baseRef := repo.RemoteTrackingBranch("kagen")
-	if err := validatePullRefs(repo, mergeRef, baseRef); err != nil {
+	if err := validatePullRefs(repo, mergeRef, baseRef, localBaseSHA); err != nil {
 		return err
 	}
 
@@ -86,7 +87,7 @@ func runPull(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func validatePullRefs(repo *git.Repository, reviewRef, baseRef string) error {
+func validatePullRefs(repo *git.Repository, reviewRef, baseRef, localBaseSHA string) error {
 	if !repo.HasRef(reviewRef) {
 		if repo.HasRef(baseRef) {
 			return fmt.Errorf(
@@ -112,12 +113,14 @@ func validatePullRefs(repo *git.Repository, reviewRef, baseRef string) error {
 	if err != nil {
 		return fmt.Errorf("resolving base ref %s: %w", baseRef, err)
 	}
-	headSHA, err := repo.ResolveRef("HEAD")
-	if err != nil {
-		return fmt.Errorf("resolving HEAD: %w", err)
+	if localBaseSHA == "" {
+		localBaseSHA, err = repo.ResolveRef("HEAD")
+		if err != nil {
+			return fmt.Errorf("resolving HEAD: %w", err)
+		}
 	}
 
-	if baseSHA != reviewSHA && baseSHA != headSHA {
+	if baseSHA != reviewSHA && baseSHA != localBaseSHA {
 		return fmt.Errorf(
 			"unexpected remote branch state: %s advanced independently of %s; refusing to merge ambiguous review state",
 			baseRef,

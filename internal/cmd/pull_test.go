@@ -34,7 +34,7 @@ func TestValidatePullRefsRejectsCanonicalBranchDrift(t *testing.T) {
 	runGit(t, dir, "branch", repo.RemoteTrackingBranch("kagen"))
 	runGit(t, dir, "reset", "--hard", "HEAD~1")
 
-	if err := validatePullRefs(repo, repo.KagenRemoteTrackingBranch("kagen"), repo.RemoteTrackingBranch("kagen")); err == nil {
+	if err := validatePullRefs(repo, repo.KagenRemoteTrackingBranch("kagen"), repo.RemoteTrackingBranch("kagen"), repo.HeadSHA); err == nil {
 		t.Fatal("validatePullRefs() expected error for canonical branch drift")
 	}
 }
@@ -52,12 +52,45 @@ func TestValidatePullRefsRejectsMissingReviewBranch(t *testing.T) {
 
 	runGit(t, dir, "branch", repo.RemoteTrackingBranch("kagen"))
 
-	err = validatePullRefs(repo, repo.KagenRemoteTrackingBranch("kagen"), repo.RemoteTrackingBranch("kagen"))
+	err = validatePullRefs(repo, repo.KagenRemoteTrackingBranch("kagen"), repo.RemoteTrackingBranch("kagen"), repo.HeadSHA)
 	if err == nil {
 		t.Fatal("validatePullRefs() expected error for missing review branch")
 	}
 	if !strings.Contains(err.Error(), kagerr.ErrNoReviewableChanges.Error()) {
 		t.Fatalf("validatePullRefs() error = %v, want ErrNoReviewableChanges", err)
+	}
+}
+
+func TestValidatePullRefsAllowsCanonicalBranchAtPreWIPHead(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	repo, err := git.Discover(dir)
+	if err != nil {
+		t.Fatalf("Discover() returned error: %v", err)
+	}
+	localBaseSHA := repo.HeadSHA
+
+	writeFile(t, filepath.Join(dir, "review.txt"), "review\n")
+	runGit(t, dir, "add", "review.txt")
+	runGit(t, dir, "commit", "-m", "review")
+	runGit(t, dir, "branch", repo.KagenRemoteTrackingBranch("kagen"))
+	runGit(t, dir, "reset", "--hard", "HEAD~1")
+	runGit(t, dir, "branch", repo.RemoteTrackingBranch("kagen"))
+
+	writeFile(t, filepath.Join(dir, "wip.txt"), "wip\n")
+	runGit(t, dir, "add", "wip.txt")
+	runGit(t, dir, "commit", "-m", "wip")
+
+	repo, err = git.Discover(dir)
+	if err != nil {
+		t.Fatalf("Discover() after WIP returned error: %v", err)
+	}
+
+	if err := validatePullRefs(repo, repo.KagenRemoteTrackingBranch("kagen"), repo.RemoteTrackingBranch("kagen"), localBaseSHA); err != nil {
+		t.Fatalf("validatePullRefs() returned error: %v", err)
 	}
 }
 
