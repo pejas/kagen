@@ -69,8 +69,8 @@ func TestBuildRuntimePodUsesInternalWorkloadBuilderWithoutDevfile(t *testing.T) 
 	if got := pod.Spec.Containers[1].Image; got != workload.DefaultImages().Toolbox {
 		t.Fatalf("runtime container image = %q, want %q", got, workload.DefaultImages().Toolbox)
 	}
-	if strings.Contains(strings.Join(pod.Spec.Containers[1].Args, "\n"), "npm install -g") {
-		t.Fatalf("runtime container args unexpectedly install packages: %q", pod.Spec.Containers[1].Args)
+	if !strings.Contains(strings.Join(pod.Spec.Containers[1].Args, "\n"), "npm install -g @openai/codex") {
+		t.Fatalf("runtime container args should bootstrap codex, got %q", pod.Spec.Containers[1].Args)
 	}
 }
 

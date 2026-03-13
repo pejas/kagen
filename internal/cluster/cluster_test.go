@@ -36,6 +36,9 @@ func TestInjectAgentRuntimeAddsProxyEnv(t *testing.T) {
 	if got := env["CODEX_HOME"]; got != "/home/kagen/.codex" {
 		t.Fatalf("CODEX_HOME = %q", got)
 	}
+	if got := env["TERM"]; got != "xterm-256color" {
+		t.Fatalf("TERM = %q", got)
+	}
 	if !strings.Contains(env["NO_PROXY"], "forgejo.kagen-12345678.svc.cluster.local") {
 		t.Fatalf("NO_PROXY missing forgejo service: %q", env["NO_PROXY"])
 	}
@@ -77,7 +80,7 @@ func TestTinyproxyConfigUsesDedicatedConfigDir(t *testing.T) {
 	}
 }
 
-func TestProxyContainerUsesPinnedImageWithoutRuntimeInstall(t *testing.T) {
+func TestProxyContainerUsesPinnedBootstrapImage(t *testing.T) {
 	t.Parallel()
 
 	container := proxyContainer()
@@ -85,11 +88,11 @@ func TestProxyContainerUsesPinnedImageWithoutRuntimeInstall(t *testing.T) {
 	if strings.Contains(container.Image, ":latest") {
 		t.Fatalf("proxy container image should be pinned, got %q", container.Image)
 	}
-	if len(container.Command) != 1 || container.Command[0] != "tinyproxy" {
-		t.Fatalf("proxy container command = %q, want tinyproxy", container.Command)
+	if len(container.Command) != 2 || container.Command[0] != "/bin/sh" || container.Command[1] != "-lc" {
+		t.Fatalf("proxy container command = %q, want shell bootstrap", container.Command)
 	}
-	if strings.Contains(strings.Join(container.Args, "\n"), "apk add") {
-		t.Fatalf("proxy container args should not install packages at runtime: %q", container.Args)
+	if !strings.Contains(strings.Join(container.Args, "\n"), "apk add --no-cache tinyproxy") {
+		t.Fatalf("proxy container args should install tinyproxy during bootstrap: %q", container.Args)
 	}
 }
 

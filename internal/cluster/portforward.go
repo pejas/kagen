@@ -19,7 +19,9 @@ import (
 )
 
 // PortForwarder starts kubectl-backed port-forward sessions.
-type PortForwarder struct{}
+type PortForwarder struct {
+	kubeCtx string
+}
 
 // ForwardSession owns the lifecycle of a single kubectl port-forward process.
 type ForwardSession struct {
@@ -49,8 +51,8 @@ type readyResult struct {
 var forwardingLinePattern = regexp.MustCompile(`^Forwarding from .+:(\d+) -> (\d+)$`)
 
 // NewPortForwarder returns a new kubectl-backed PortForwarder.
-func NewPortForwarder() *PortForwarder {
-	return &PortForwarder{}
+func NewPortForwarder(kubeCtx string) *PortForwarder {
+	return &PortForwarder{kubeCtx: kubeCtx}
 }
 
 // Start begins the port-forward and returns an explicit session handle.
@@ -65,7 +67,11 @@ func (p *PortForwarder) Start(ctx context.Context, namespace, target string, loc
 	}
 	ui.Verbose("Starting port-forward %s/%s with spec %s", namespace, target, portSpec)
 
-	args := []string{"port-forward", "-n", namespace, target, portSpec}
+	args := []string{}
+	if p.kubeCtx != "" {
+		args = append(args, "--context", p.kubeCtx)
+	}
+	args = append(args, "port-forward", "-n", namespace, target, portSpec)
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 
 	stdout, err := cmd.StdoutPipe()

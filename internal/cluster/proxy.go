@@ -25,7 +25,7 @@ const (
 	proxyServiceName    = "egress-proxy"
 	proxyPolicyName     = "egress-proxy-egress"
 	proxyConfigMapName  = "egress-proxy-config"
-	proxyImage          = "ghcr.io/pejas/kagen-proxy:2026-03-12"
+	proxyImage          = "alpine@sha256:55ae5d250caebc548793f321534bc6a8ef1d116f334f18f4ada1b2daad3251b2"
 	proxyPort           = 8888
 	proxyConfigDir      = "/etc/kagen-proxy"
 	proxyConfigChecksum = "kagen.io/proxy-config-sha256"
@@ -244,8 +244,10 @@ func proxyContainer() corev1.Container {
 	return corev1.Container{
 		Name:    "proxy",
 		Image:   proxyImage,
-		Command: []string{"tinyproxy"},
-		Args:    []string{"-d", "-c", proxyConfigDir + "/tinyproxy.conf"},
+		Command: []string{"/bin/sh", "-lc"},
+		Args: []string{`set -eu
+apk add --no-cache tinyproxy >/dev/null
+exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`},
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "http",

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/pejas/kagen/internal/git"
@@ -56,6 +55,9 @@ func (b *baseAgent) Attach(ctx context.Context) error {
 	}
 
 	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
+	if err := b.ensureStatePath(ctx, ns); err != nil {
+		return err
+	}
 
 	// We use the same logic as KubeManager.AttachAgent but specialized here.
 	// In a real implementation, we'd look up the pod by labels.
@@ -65,12 +67,30 @@ func (b *baseAgent) Attach(ctx context.Context) error {
 }
 
 func (b *baseAgent) commandArgs() []string {
-	shell := b.spec.AttachShell
-	if strings.TrimSpace(b.statePath) != "" {
-		shell = b.spec.AttachShellForStatePath(b.statePath)
+	command := agentBinaryCommand(b.spec)
+	if b.statePath == "" {
+		return command
 	}
 
-	return []string{"/bin/sh", "-lc", shell}
+	env := []string{"env", "HOME=" + b.statePath}
+	if b.agentType == Codex {
+		env = append(env, "CODEX_HOME="+b.statePath)
+	}
+
+	return append(env, command...)
+}
+
+func (b *baseAgent) ensureStatePath(ctx context.Context, namespace string) error {
+	if b.statePath == "" {
+		return nil
+	}
+
+	command := []string{"/bin/mkdir", "-p", b.statePath}
+	if _, err := b.exec.Run(ctx, namespace, "agent", command, kubeexec.WithContainer(b.containerName)); err != nil {
+		return fmt.Errorf("preparing agent state path %s: %w", b.statePath, err)
+	}
+
+	return nil
 }
 
 func (b *baseAgent) waitForRuntime(ctx context.Context, namespace string) error {
@@ -135,5 +155,14 @@ func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName, statePath st
 		statePath:     statePath,
 		spec:          spec,
 		exec:          kubeexec.NewRunner(kubeCtx),
+	}
+}
+
+func agentBinaryCommand(spec RuntimeSpec) []string {
+	switch spec.Type {
+	case Codex:
+		return []string{spec.Binary, "--sandbox", "danger-full-access", "-a", "never"}
+	default:
+		return []string{spec.Binary}
 	}
 }

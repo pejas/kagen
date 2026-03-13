@@ -17,6 +17,7 @@ var requiredHosts = hostCatalogue{
 			"api.anthropic.com",
 		},
 		"codex": {
+			"auth.openai.com",
 			"api.openai.com",
 		},
 		"opencode": {

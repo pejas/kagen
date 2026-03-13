@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	defaultWorkspaceImage = "ghcr.io/pejas/kagen-workspace:2026-03-12"
-	defaultToolboxImage   = "ghcr.io/pejas/kagen-toolbox:2026-03-12"
+	defaultWorkspaceImage = "vxcontrol/codebase@sha256:2ee2867ec75078d66cbdc745ca5c32f0fa619b947de739aab905a2e7367f7632"
+	defaultToolboxImage   = "vxcontrol/codebase@sha256:2ee2867ec75078d66cbdc745ca5c32f0fa619b947de739aab905a2e7367f7632"
 	defaultWorkspaceName  = "workspace"
 	defaultAgentHomeName  = "agent-home"
 	defaultWorkspaceMount = "/projects"
@@ -101,11 +101,12 @@ func workspaceContainer(images Images) corev1.Container {
 
 func runtimeContainer(spec agent.RuntimeSpec, images Images) corev1.Container {
 	return corev1.Container{
-		Name:    spec.ContainerName(),
-		Image:   images.Toolbox,
-		Command: spec.ToolboxBootstrapCommand(),
-		Args:    spec.ToolboxBootstrapArgs(),
-		Env:     requiredEnv(spec.RequiredEnv),
+		Name:       spec.ContainerName(),
+		Image:      images.Toolbox,
+		Command:    spec.LegacyBootstrapCommand(),
+		Args:       spec.LegacyBootstrapArgs(),
+		Env:        requiredEnv(spec.RequiredEnv),
+		WorkingDir: defaultWorkspaceMount + "/workspace",
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      "git-workspace",

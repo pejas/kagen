@@ -86,6 +86,9 @@ func TestLoadPolicyCodexIncludesRequiredHosts(t *testing.T) {
 	t.Parallel()
 
 	policy := LoadPolicy(&config.Config{}, "codex")
+	if !policy.AllowsDestination("auth.openai.com") {
+		t.Error("LoadPolicy(codex) should allow auth.openai.com")
+	}
 	if !policy.AllowsDestination("api.openai.com") {
 		t.Error("LoadPolicy(codex) should allow api.openai.com")
 	}

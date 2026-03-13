@@ -203,7 +203,7 @@ func (c *testContext) itShouldCreateAWIPCommit() error {
 }
 
 func (c *testContext) itShouldFetchChangesFromForgejo() error {
-	return c.theOutputShouldContain("Connecting to in-cluster Forgejo")
+	return c.theOutputShouldContain("Fetching changes from")
 }
 
 func (c *testContext) itShouldMergeTheChangesIntoTheCurrentBranch() error {

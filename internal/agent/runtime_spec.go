@@ -9,6 +9,7 @@ import (
 )
 
 const defaultHomeDir = "/home/kagen"
+const defaultTerm = "xterm-256color"
 
 type runtimeBootstrap struct {
 	command []string
@@ -49,6 +50,7 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			AttachShell:   "cd /projects/workspace && exec claude",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
+				{Name: "TERM", Value: defaultTerm},
 				{Name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1"},
 			},
 			legacyBootstrap: npmBootstrap("claude", "@anthropic-ai/claude-code"),
@@ -62,9 +64,10 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			AttachShell:   "cd /projects/workspace && exec codex --sandbox danger-full-access -a never",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
+				{Name: "TERM", Value: defaultTerm},
 				{Name: "CODEX_HOME", Value: defaultHomeDir + "/.codex"},
 			},
-			legacyBootstrap: npmBootstrap("codex", "@openai/codex"),
+			legacyBootstrap: npmBootstrapLatest("codex", "@openai/codex"),
 		}, nil
 	case OpenCode:
 		return RuntimeSpec{
@@ -75,6 +78,7 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			AttachShell:   "cd /projects/workspace && exec opencode",
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
+				{Name: "TERM", Value: defaultTerm},
 			},
 			legacyBootstrap: npmBootstrap("opencode", "opencode-ai"),
 		}, nil
@@ -181,6 +185,25 @@ if ! command -v %s >/dev/null 2>&1; then
   npm install -g %s
 fi
 exec tail -f /dev/null`, binary, npmPackage)},
+	}
+}
+
+func npmBootstrapLatest(binary, npmPackage string) runtimeBootstrap {
+	return runtimeBootstrap{
+		command: []string{"/bin/sh", "-lc"},
+		args: []string{fmt.Sprintf(`set -eu
+export DEBIAN_FRONTEND=noninteractive
+if ! command -v git >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y --no-install-recommends git ca-certificates curl ripgrep procps
+  rm -rf /var/lib/apt/lists/*
+fi
+npm install -g %s@latest
+if ! command -v %s >/dev/null 2>&1; then
+  echo "%s was not found after npm bootstrap" >&2
+  exit 1
+fi
+exec tail -f /dev/null`, npmPackage, binary, binary)},
 	}
 }
 

@@ -32,8 +32,8 @@ func TestRuntimeSpecLegacyBootstrapPreservesRuntimeInstallation(t *testing.T) {
 		t.Fatalf("SpecFor(codex) returned error: %v", err)
 	}
 
-	if !strings.Contains(strings.Join(spec.LegacyBootstrapArgs(), "\n"), "npm install -g @openai/codex") {
-		t.Fatalf("LegacyBootstrapArgs() = %q, want npm bootstrap", spec.LegacyBootstrapArgs())
+	if !strings.Contains(strings.Join(spec.LegacyBootstrapArgs(), "\n"), "npm install -g @openai/codex@latest") {
+		t.Fatalf("LegacyBootstrapArgs() = %q, want latest npm bootstrap", spec.LegacyBootstrapArgs())
 	}
 }
 
@@ -51,6 +51,9 @@ func TestRuntimeSpecAttachShellForStatePathIsolatesRuntimeState(t *testing.T) {
 	}
 	if !strings.Contains(shell, `export HOME="/home/kagen/.codex/session-1"`) {
 		t.Fatalf("AttachShellForStatePath() missing HOME override: %q", shell)
+	}
+	if !strings.Contains(shell, `export TERM="xterm-256color"`) {
+		t.Fatalf("AttachShellForStatePath() missing TERM export: %q", shell)
 	}
 	if !strings.Contains(shell, `export CODEX_HOME="/home/kagen/.codex/session-1"`) {
 		t.Fatalf("AttachShellForStatePath() missing CODEX_HOME override: %q", shell)

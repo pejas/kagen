@@ -93,7 +93,7 @@ func newForgejoService(kubeCtx string) (*forgejo.ForgejoService, error) {
 
 	return forgejo.NewForgejoService(
 		clientset,
-		cluster.NewPortForwarder(),
+		cluster.NewPortForwarder(kubeCtx),
 		kubeexec.NewRunner(kubeCtx),
 	), nil
 }
