@@ -438,6 +438,23 @@ Each test should:
 - targeted PTY smoke runs in CI or a controlled local environment
 - manual confirmation that tests can recover cleanly from Ctrl+C termination
 
+### Final Notes (2026-03-13)
+
+- Implemented PTY-backed smoke coverage in `internal/e2e/runtime_interactive_test.go`.
+- The smoke tests reuse the detached readiness path, then attach through the real `kagen attach` CLI flow for Codex, Claude, and OpenCode.
+- Credible startup signals are asserted per agent rather than by generic CLI output matching:
+  - Codex: sign-in welcome screen
+  - Claude: `Welcome to Claude Code`
+  - OpenCode: branded splash plus interactive prompt
+- Clean termination is covered through Ctrl+C handling, including Claude's multi-step first-run exit path.
+- Claude interactive startup required `platform.claude.com` in the default proxy allowlist in addition to `api.anthropic.com`.
+- In this environment, validation still required the documented local-image override path:
+  - `KAGEN_WORKSPACE_IMAGE=ghcr.io/pejas/kagen-workspace:local`
+  - `KAGEN_TOOLBOX_IMAGE=ghcr.io/pejas/kagen-toolbox:local`
+  - `KAGEN_PROXY_IMAGE=ghcr.io/pejas/kagen-proxy:local`
+- The full `make test-e2e` suite exceeded Go's default 10 minute timeout once the interactive smoke layer was added, so the explicit E2E target timeout was raised.
+- Follow-up note only: if later phases want faster runtime-backed feedback, prefer a dedicated interactive smoke subset or sharded E2E execution rather than reducing the Phase 6 attach coverage.
+
 ### Handoff Instruction
 
 Read `docs/runtime-reliability-and-e2e-plan-2026-03-13.md` and execute Phase 6 only. Add minimal PTY smoke coverage for supported agents. Do not expand into full agent interaction test suites.

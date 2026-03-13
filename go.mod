@@ -3,6 +3,7 @@ module github.com/pejas/kagen
 go 1.26.1
 
 require (
+	github.com/creack/pty v1.1.11
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0

@@ -32,7 +32,7 @@ test: build
 
 ## test-e2e: run the end-to-end suite explicitly
 test-e2e: build
-	$(GOTEST) -race -count=1 -v ./internal/e2e
+	$(GOTEST) -timeout=20m -race -count=1 -v ./internal/e2e
 
 ## lint: run golangci-lint
 lint:

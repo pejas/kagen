@@ -107,3 +107,15 @@ func TestLoadPolicyOpenCodeIncludesRequiredHosts(t *testing.T) {
 		t.Error("LoadPolicy(opencode) should not allow registry.npmjs.org once the toolbox image is prebuilt")
 	}
 }
+
+func TestLoadPolicyClaudeIncludesRequiredHosts(t *testing.T) {
+	t.Parallel()
+
+	policy := LoadPolicy(&config.Config{}, "claude")
+	if !policy.AllowsDestination("api.anthropic.com") {
+		t.Error("LoadPolicy(claude) should allow api.anthropic.com")
+	}
+	if !policy.AllowsDestination("platform.claude.com") {
+		t.Error("LoadPolicy(claude) should allow platform.claude.com")
+	}
+}

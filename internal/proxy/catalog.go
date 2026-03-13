@@ -13,6 +13,7 @@ var requiredHosts = hostCatalogue{
 	AgentRequired: map[string][]string{
 		"claude": {
 			"api.anthropic.com",
+			"platform.claude.com",
 		},
 		"codex": {
 			"auth.openai.com",
