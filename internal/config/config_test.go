@@ -88,10 +88,19 @@ func TestLoadHierarchy(t *testing.T) {
 	}
 
 	// Project config (in current working directory of the test).
-	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() returned error: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("Chdir(%q) returned error: %v", cwd, err)
+		}
+	}()
 	projectDir := t.TempDir()
-	os.Chdir(projectDir)
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatalf("Chdir(%q) returned error: %v", projectDir, err)
+	}
 
 	if err := os.WriteFile(".kagen.yaml", []byte("agent: claude\n"), 0o644); err != nil {
 		t.Fatalf("failed to write project config: %v", err)

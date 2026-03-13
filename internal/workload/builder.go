@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	defaultWorkspaceImage = "vxcontrol/codebase:latest"
+	defaultWorkspaceImage = "ghcr.io/pejas/kagen-workspace:2026-03-12"
 	defaultToolboxImage   = "ghcr.io/pejas/kagen-toolbox:2026-03-12"
 	defaultWorkspaceName  = "workspace"
 	defaultAgentHomeName  = "agent-home"

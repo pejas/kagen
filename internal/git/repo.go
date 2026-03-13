@@ -3,11 +3,11 @@ package git
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	kagerr "github.com/pejas/kagen/internal/errors"
@@ -23,6 +23,12 @@ type Repository struct {
 
 	// HeadSHA is the full SHA of HEAD.
 	HeadSHA string
+}
+
+// BasicAuth carries transient HTTP basic-auth credentials for one Git operation.
+type BasicAuth struct {
+	Username string
+	Password string
 }
 
 // ID returns a unique short identifier for the repository based on its path.
@@ -50,10 +56,11 @@ func (r *Repository) RemoteTrackingBranch(remote string) string {
 	return remote + "/" + r.CurrentBranch
 }
 
-// Discover walks up from startPath to find the root of a Git repository.
+// Discover resolves the top-level directory of the Git repository containing
+// startPath. It supports normal repositories and worktrees.
 // Returns ErrNotGitRepo if no repository is found.
 func Discover(startPath string) (*Repository, error) {
-	root, err := findGitRoot(startPath)
+	root, err := gitTopLevel(startPath)
 	if err != nil {
 		return nil, err
 	}
@@ -75,26 +82,13 @@ func Discover(startPath string) (*Repository, error) {
 	}, nil
 }
 
-// findGitRoot walks up the directory tree looking for a .git directory.
-func findGitRoot(startPath string) (string, error) {
-	dir, err := filepath.Abs(startPath)
+func gitTopLevel(startPath string) (string, error) {
+	out, err := gitCommand(startPath, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return "", fmt.Errorf("resolving absolute path: %w", err)
+		return "", kagerr.ErrNotGitRepo
 	}
 
-	for {
-		gitDir := filepath.Join(dir, ".git")
-		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached filesystem root without finding .git.
-			return "", kagerr.ErrNotGitRepo
-		}
-		dir = parent
-	}
+	return strings.TrimSpace(out), nil
 }
 
 // currentBranch returns the current branch name by running git rev-parse.
@@ -115,20 +109,6 @@ func headSHA(repoRoot string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// AddRemote adds a new remote to the repository. If it already exists, it is updated.
-func (r *Repository) AddRemote(name, url string) error {
-	// Try to add. If it exists, this will fail.
-	_, err := gitCommand(r.Path, "remote", "add", name, url)
-	if err != nil {
-		// Try to set-url instead
-		_, err = gitCommand(r.Path, "remote", "set-url", name, url)
-		if err != nil {
-			return fmt.Errorf("failed to add or update remote: %w", err)
-		}
-	}
-	return nil
-}
-
 // Push pushes the specified ref to the given remote.
 func (r *Repository) Push(ctx context.Context, remote, ref string) error {
 	return r.PushRefspecs(ctx, remote, ref)
@@ -146,6 +126,22 @@ func (r *Repository) PushRefspecs(ctx context.Context, remote string, refspecs .
 	_, err := gitCommandContext(ctx, r.Path, args...)
 	if err != nil {
 		return fmt.Errorf("git push %s %s: %w", remote, strings.Join(refspecs, " "), err)
+	}
+
+	return nil
+}
+
+// PushURL pushes one or more refspecs to the given transient remote URL.
+func (r *Repository) PushURL(ctx context.Context, remoteURL string, auth *BasicAuth, refspecs ...string) error {
+	if len(refspecs) == 0 {
+		return fmt.Errorf("git push %s: no refspecs provided", remoteURL)
+	}
+
+	args := []string{"push", "-f", remoteURL}
+	args = append(args, refspecs...)
+
+	if _, err := gitCommandContextWithAuth(ctx, r.Path, auth, args...); err != nil {
+		return fmt.Errorf("git push %s %s: %w", remoteURL, strings.Join(refspecs, " "), err)
 	}
 
 	return nil
@@ -174,6 +170,43 @@ func (r *Repository) Fetch(ctx context.Context, remote string) error {
 		return fmt.Errorf("git fetch %s: %w", remote, err)
 	}
 	return nil
+}
+
+// FetchURL fetches one or more refspecs from a transient remote URL without
+// persisting any remote configuration in .git/config.
+func (r *Repository) FetchURL(ctx context.Context, remoteURL string, auth *BasicAuth, refspecs ...string) error {
+	if len(refspecs) == 0 {
+		return fmt.Errorf("git fetch %s: no refspecs provided", remoteURL)
+	}
+
+	args := []string{"fetch", "--prune", remoteURL}
+	args = append(args, refspecs...)
+
+	if _, err := gitCommandContextWithAuth(ctx, r.Path, auth, args...); err != nil {
+		return fmt.Errorf("git fetch %s %s: %w", remoteURL, strings.Join(refspecs, " "), err)
+	}
+
+	return nil
+}
+
+// RemoteRefSHA resolves a remote ref on a transient remote URL.
+func (r *Repository) RemoteRefSHA(ctx context.Context, remoteURL string, auth *BasicAuth, ref string) (string, bool, error) {
+	out, err := gitCommandContextWithAuth(ctx, r.Path, auth, "ls-remote", remoteURL, ref)
+	if err != nil {
+		return "", false, fmt.Errorf("git ls-remote %s %s: %w", remoteURL, ref, err)
+	}
+
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return "", false, nil
+	}
+
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return "", false, fmt.Errorf("parsing git ls-remote output %q", line)
+	}
+
+	return fields[0], true, nil
 }
 
 // Merge merges the specified ref into the current branch.
@@ -240,8 +273,50 @@ func gitCommandContext(ctx context.Context, dir string, args ...string) (string,
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), string(out), err)
+		return "", wrapGitContextError(ctx, args, out, err)
 	}
 
 	return string(out), nil
+}
+
+func gitCommandContextWithAuth(ctx context.Context, dir string, auth *BasicAuth, args ...string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = gitEnvWithAuth(auth)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", wrapGitContextError(ctx, args, out, err)
+	}
+
+	return string(out), nil
+}
+
+func gitEnvWithAuth(auth *BasicAuth) []string {
+	env := append([]string{}, os.Environ()...)
+	env = append(env, "GIT_TERMINAL_PROMPT=0")
+	if auth == nil || auth.Username == "" {
+		return env
+	}
+
+	header := "Authorization: Basic " + base64.StdEncoding.EncodeToString([]byte(auth.Username+":"+auth.Password))
+	env = append(env,
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.extraHeader",
+		"GIT_CONFIG_VALUE_0="+header,
+	)
+
+	return env
+}
+
+func wrapGitContextError(ctx context.Context, args []string, out []byte, err error) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	return fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), string(out), err)
 }

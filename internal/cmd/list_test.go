@@ -65,7 +65,11 @@ func TestListCommandReadsPersistedSessionsForCurrentRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Getwd() returned error: %v", err)
 	}
-	defer os.Chdir(cwd)
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("Chdir(%q) returned error: %v", cwd, err)
+		}
+	}()
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatalf("Chdir(%q) returned error: %v", repoDir, err)
 	}
@@ -164,7 +168,11 @@ func TestListCommandShowsMultipleAgentSessionsPerType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Getwd() returned error: %v", err)
 	}
-	defer os.Chdir(cwd)
+	defer func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("Chdir(%q) returned error: %v", cwd, err)
+		}
+	}()
 	if err := os.Chdir(repoDir); err != nil {
 		t.Fatalf("Chdir(%q) returned error: %v", repoDir, err)
 	}

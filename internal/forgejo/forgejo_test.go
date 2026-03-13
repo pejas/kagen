@@ -1,83 +1,33 @@
 package forgejo
 
 import (
-	"context"
-	"errors"
 	"testing"
 
-	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
+	corev1 "k8s.io/api/core/v1"
 )
 
-func TestStubServiceEnsureRepo(t *testing.T) {
+func TestReviewSessionReviewURLUsesActiveBaseURL(t *testing.T) {
 	t.Parallel()
 
-	svc := NewStubService()
-	repo := &git.Repository{Path: "/fake"}
-	err := svc.EnsureRepo(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestStubServiceImportRepo(t *testing.T) {
-	t.Parallel()
-
-	svc := NewStubService()
-	repo := &git.Repository{Path: "/fake"}
-	err := svc.ImportRepo(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestStubServiceGetReviewURL(t *testing.T) {
-	t.Parallel()
-
-	svc := NewStubService()
-	repo := &git.Repository{Path: "/fake"}
-	_, err := svc.GetReviewURL(repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestStubServiceHasNewCommits(t *testing.T) {
-	t.Parallel()
-
-	svc := NewStubService()
-	repo := &git.Repository{Path: "/fake"}
-	_, err := svc.HasNewCommits(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestForgejoServiceGetReviewURLUsesKagenBranch(t *testing.T) {
-	t.Parallel()
-
-	svc := NewForgejoService(nil, nil, nil)
+	session := &ReviewSession{baseURL: "http://127.0.0.1:54321"}
 	repo := &git.Repository{CurrentBranch: "feature/x"}
 
-	got, err := svc.GetReviewURL(repo)
-	if err != nil {
-		t.Fatalf("GetReviewURL() returned error: %v", err)
-	}
-
-	want := "http://localhost:3000/kagen/workspace/src/branch/kagen%2Ffeature%2Fx"
-	if got != want {
-		t.Fatalf("GetReviewURL() = %q, want %q", got, want)
+	want := "http://127.0.0.1:54321/kagen/workspace/src/branch/kagen%2Ffeature%2Fx"
+	if got := session.ReviewURL(repo); got != want {
+		t.Fatalf("ReviewURL() = %q, want %q", got, want)
 	}
 }
 
-func TestForgejoServiceHasNewCommitsReturnsNotImplemented(t *testing.T) {
+func TestAuthFromSecretRejectsMissingValues(t *testing.T) {
 	t.Parallel()
 
-	svc := NewForgejoService(nil, nil, nil)
-	repo := &git.Repository{Path: "/fake"}
-
-	_, err := svc.HasNewCommits(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Fatalf("expected ErrNotImplemented, got %v", err)
+	_, err := authFromSecret(&corev1.Secret{
+		Data: map[string][]byte{
+			forgejoSecretUsernameKey: []byte(forgejoAdminUsername),
+		},
+	})
+	if err == nil {
+		t.Fatal("authFromSecret() expected error for missing password")
 	}
 }

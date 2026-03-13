@@ -32,21 +32,6 @@ func (s Status) String() string {
 	}
 }
 
-// Manager defines the interface for controlling the local container runtime.
-type Manager interface {
-	// EnsureRunning starts the runtime if it is not already running.
-	EnsureRunning(ctx context.Context) error
-
-	// Stop shuts down the runtime if it is currently running.
-	Stop(ctx context.Context) error
-
-	// Status returns the current runtime status.
-	Status(ctx context.Context) (Status, error)
-
-	// KubeContext returns the kubectl context name for this runtime.
-	KubeContext() string
-}
-
 // StubManager is a placeholder implementation that returns ErrNotImplemented.
 type StubManager struct{}
 

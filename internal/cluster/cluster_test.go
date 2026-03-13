@@ -1,70 +1,14 @@
 package cluster
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
-	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-func TestStubManagerEnsureNamespace(t *testing.T) {
-	t.Parallel()
-
-	mgr := NewStubManager()
-	repo := &git.Repository{Path: "/fake"}
-	err := mgr.EnsureNamespace(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestStubManagerEnsureResources(t *testing.T) {
-	t.Parallel()
-	mgr := NewStubManager()
-	err := mgr.EnsureResources(context.Background(), &git.Repository{}, "codex", nil, nil)
-	if err == nil {
-		t.Error("EnsureResources() expected error, got nil")
-	}
-}
-
-func TestStubManagerAttachAgent(t *testing.T) {
-	t.Parallel()
-
-	mgr := NewStubManager()
-	repo := &git.Repository{Path: "/fake"}
-	err := mgr.AttachAgent(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestStubManagerEnsureProxy(t *testing.T) {
-	t.Parallel()
-
-	mgr := NewStubManager()
-	repo := &git.Repository{Path: "/fake"}
-	err := mgr.EnsureProxy(context.Background(), repo, &proxy.Policy{})
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
-
-func TestStubManagerProxyReady(t *testing.T) {
-	t.Parallel()
-
-	mgr := NewStubManager()
-	repo := &git.Repository{Path: "/fake"}
-	_, err := mgr.ProxyReady(context.Background(), repo)
-	if !errors.Is(err, kagerr.ErrNotImplemented) {
-		t.Errorf("expected ErrNotImplemented, got %v", err)
-	}
-}
 
 func TestInjectAgentRuntimeAddsProxyEnv(t *testing.T) {
 	t.Parallel()
@@ -133,6 +77,22 @@ func TestTinyproxyConfigUsesDedicatedConfigDir(t *testing.T) {
 	}
 }
 
+func TestProxyContainerUsesPinnedImageWithoutRuntimeInstall(t *testing.T) {
+	t.Parallel()
+
+	container := proxyContainer()
+
+	if strings.Contains(container.Image, ":latest") {
+		t.Fatalf("proxy container image should be pinned, got %q", container.Image)
+	}
+	if len(container.Command) != 1 || container.Command[0] != "tinyproxy" {
+		t.Fatalf("proxy container command = %q, want tinyproxy", container.Command)
+	}
+	if strings.Contains(strings.Join(container.Args, "\n"), "apk add") {
+		t.Fatalf("proxy container args should not install packages at runtime: %q", container.Args)
+	}
+}
+
 func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
 	t.Parallel()
 
@@ -152,8 +112,22 @@ func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
 	if !strings.Contains(args[0], `git checkout --track -b "kagen/main" "origin/kagen/main"`) {
 		t.Fatalf("workspace sync script missing review branch tracking checkout: %q", args[0])
 	}
-	if !strings.Contains(args[0], `git ls-remote "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git"`) {
+	if strings.Contains(args[0], "kagen-internal-secret") {
+		t.Fatalf("workspace sync script should not embed forgejo credentials: %q", args[0])
+	}
+	if !strings.Contains(args[0], `git ls-remote "$repo_url"`) {
 		t.Fatalf("workspace sync script missing forgejo availability check: %q", args[0])
+	}
+
+	env := pod.Spec.InitContainers[0].Env
+	if len(env) != 2 {
+		t.Fatalf("expected 2 credential env vars, got %d", len(env))
+	}
+	if env[0].ValueFrom == nil || env[0].ValueFrom.SecretKeyRef == nil || env[0].ValueFrom.SecretKeyRef.Name != forgejoBootstrapSecretName {
+		t.Fatalf("FORGEJO_USERNAME should come from secret %q: %#v", forgejoBootstrapSecretName, env[0].ValueFrom)
+	}
+	if env[1].ValueFrom == nil || env[1].ValueFrom.SecretKeyRef == nil || env[1].ValueFrom.SecretKeyRef.Name != forgejoBootstrapSecretName {
+		t.Fatalf("FORGEJO_PASSWORD should come from secret %q: %#v", forgejoBootstrapSecretName, env[1].ValueFrom)
 	}
 }
 

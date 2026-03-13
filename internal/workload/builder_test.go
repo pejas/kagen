@@ -66,6 +66,18 @@ func TestBuilderBuildPodUsesToolboxImageWithoutRuntimeInstallation(t *testing.T)
 	}
 }
 
+func TestDefaultImagesAreReleasePinned(t *testing.T) {
+	t.Parallel()
+
+	images := DefaultImages()
+	if strings.Contains(images.Workspace, ":latest") {
+		t.Fatalf("workspace image should not use a mutable latest tag: %q", images.Workspace)
+	}
+	if strings.Contains(images.Toolbox, ":latest") {
+		t.Fatalf("toolbox image should not use a mutable latest tag: %q", images.Toolbox)
+	}
+}
+
 func TestBuilderBuildPodRequiresRuntimeType(t *testing.T) {
 	t.Parallel()
 
