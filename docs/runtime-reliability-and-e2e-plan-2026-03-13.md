@@ -506,12 +506,112 @@ Execute phases strictly in this order:
 6. Phase 6: Interactive Agent Smoke Tests
 7. Phase 7: Optional `doctor` Command
 
+After Phase 7 is complete, return to Phase 2 of
+`docs/runtime-image-mise-plan-2026-03-13.md`.
+
 ## Why This Order
 
 - Phases 1 to 3 make failures visible and diagnosable.
 - Phase 4 creates the clean automation boundary E2E needs.
 - Phases 5 and 6 then improve confidence with better test coverage.
 - Phase 7 becomes easy because the diagnostic substrate already exists.
+- The runtime-image plan's Phase 2 depends on a more trustworthy and diagnosable
+  runtime, so it should follow the reliability and E2E work rather than run in
+  parallel.
+
+## Clean-Context Agent Prompts
+
+Use these prompts verbatim, or with only minimal task-specific edits, when
+starting a fresh agent context.
+
+### Phase 1 Prompt
+
+```text
+You are working in /Users/pejas/Projects/kagen.
+
+Start by reading:
+- /Users/pejas/Projects/kagen/AGENTS.md
+- /Users/pejas/Projects/kagen/docs/ARCHITECTURE.md
+- /Users/pejas/Projects/kagen/docs/RUNTIME-ARTEFACTS.md
+- /Users/pejas/Projects/kagen/docs/runtime-reliability-and-e2e-plan-2026-03-13.md
+
+Goal:
+Execute Phase 1 of /Users/pejas/Projects/kagen/docs/runtime-reliability-and-e2e-plan-2026-03-13.md only.
+
+Important constraints:
+- Follow AGENTS.md exactly.
+- Do not overstep into later phases.
+- Keep internal/workload as the source of truth for baseline pod generation.
+- Keep internal/cmd thin.
+- Reuse shared adapters for kubectl exec/port-forward behaviour.
+- Prefer structured diagnostics over ad hoc logging.
+- If you discover later-phase work, record it as follow-up notes only.
+
+Phase 1 outcomes to deliver:
+1. Add step-level runtime diagnostics for start and attach.
+2. Make failed phases explicit instead of collapsing into generic launch messages.
+3. Add tests for successful and failed step recording.
+4. Update documentation affected by the new diagnostics behaviour.
+
+Validation:
+- Run make test.
+- Run make build.
+- Run any additional targeted verification that is useful for this phase.
+- Do not run make test-e2e for this phase unless strictly required by the phase work.
+
+Deliverables at the end:
+- Implemented Phase 1 code changes
+- Updated docs
+- Short summary of what changed
+- Residual risks or follow-up notes for later phases only
+
+Handover:
+Include a code block at the end of your final response with the exact clean-context prompt for Phase 2 from /Users/pejas/Projects/kagen/docs/runtime-reliability-and-e2e-plan-2026-03-13.md.
+```
+
+### Next-Phase Handover Prompt
+
+```text
+You are working in /Users/pejas/Projects/kagen.
+
+Start by reading:
+- /Users/pejas/Projects/kagen/AGENTS.md
+- /Users/pejas/Projects/kagen/docs/ARCHITECTURE.md
+- /Users/pejas/Projects/kagen/docs/RUNTIME-ARTEFACTS.md
+- /Users/pejas/Projects/kagen/docs/runtime-reliability-and-e2e-plan-2026-03-13.md
+
+Goal:
+Execute Phase 2 of /Users/pejas/Projects/kagen/docs/runtime-reliability-and-e2e-plan-2026-03-13.md only.
+
+Important constraints:
+- Follow AGENTS.md exactly.
+- Do not overstep into later phases.
+- Build on top of the completed Phase 1 step trace.
+- Reuse shared adapters and avoid introducing new direct kubectl shell-outs outside the existing shared adapters.
+- Keep diagnostics deterministic and machine-readable where practical.
+- If you discover later-phase work, record it as follow-up notes only.
+
+Phase 2 outcomes to deliver:
+1. Add automatic failure artefact capture for start and attach.
+2. Save artefacts in a deterministic per-session location.
+3. Capture the most useful local and cluster diagnostics for failed runs.
+4. Update tests and docs for the artefact collection flow.
+
+Validation:
+- Run make test.
+- Run make build.
+- Run any additional targeted verification that is useful for this phase.
+- Do not start Phase 3 work.
+
+Deliverables at the end:
+- Implemented Phase 2 code changes
+- Updated docs
+- Short summary of what changed
+- Residual risks or follow-up notes for later phases only
+
+Handover:
+Include a code block at the end of your final response with the exact clean-context prompt for Phase 3 from /Users/pejas/Projects/kagen/docs/runtime-reliability-and-e2e-plan-2026-03-13.md.
+```
 
 ## Success Criteria Across All Phases
 
