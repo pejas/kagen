@@ -27,6 +27,9 @@ type Agent interface {
 	// Launch starts the agent workload inside the cluster.
 	Launch(ctx context.Context) error
 
+	// Prepare ensures any runtime-scoped state is ready before attach.
+	Prepare(ctx context.Context) error
+
 	// Attach connects the user's terminal to the running agent TUI.
 	Attach(ctx context.Context) error
 }

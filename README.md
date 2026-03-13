@@ -66,13 +66,13 @@ Shut down the whole local Kagen runtime environment:
 kagen down
 ```
 
-For Codex, Kagen now:
+For Codex, Kagen:
 - imports the host repository into the in-cluster Forgejo boundary,
 - clones that repository into `/projects/workspace` inside the agent pod,
 - persists Codex state in a dedicated PVC mounted at `/home/kagen/.codex`,
 - launches Codex with `danger-full-access` and `never` approval mode inside the VM, not on the host.
 
-The runtime bootstrap path now assumes prebuilt toolbox and proxy artefacts. Pod startup no longer installs agent CLIs or proxy packages with `apt-get`, `npm install`, or similar package-manager steps.
+The runtime bootstrap path assumes prebuilt toolbox and proxy artefacts. Pod startup does not install agent CLIs or proxy packages with `apt-get`, `npm install`, or similar package-manager steps.
 
 Existing repository `devfile.yaml` files are treated as legacy repository artefacts: `kagen config write` does not create them, and `kagen start` and `kagen attach` ignore them.
 
@@ -84,13 +84,15 @@ Enable verbose output:
 kagen --verbose
 ```
 
+With `--verbose`, `kagen start` and `kagen attach` emit a runtime step trace that identifies the active phase, its outcome, and its duration. Failure output names the exact failed step in the top-level error.
+
 Open the review page for the current branch:
 
 ```bash
 kagen open
 ```
 
-`kagen open` now establishes its own local Forgejo review tunnel and keeps it open until you interrupt the command.
+`kagen open` establishes its own local Forgejo review tunnel and keeps it open until you interrupt the command.
 
 Pull reviewed changes back into the local branch:
 

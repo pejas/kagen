@@ -10,6 +10,7 @@ import (
 
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/config"
+	"github.com/pejas/kagen/internal/diagnostics"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
@@ -43,11 +44,15 @@ var (
 	loadRunConfigForSession          = loadRunConfig
 	ensureRuntimeForSession          = ensureRuntime
 	newForgejoServiceForSession      = newForgejoService
-	ensureClusterResourcesForSession = ensureClusterResources
+	ensureNamespaceForSession        = ensureNamespace
+	ensureProxyForSession            = ensureProxy
+	ensureResourcesForSession        = ensureResources
 	ensureForgejoImportForSession    = ensureForgejoImport
 	validateProxyPolicyForSession    = validateProxyPolicy
 	launchAgentRuntimeForSession     = launchAgentRuntime
+	prepareAgentStateForSession      = prepareAgentState
 	attachAgentForSession            = attachAgent
+	newDiagnosticsReporterForSession = func() diagnostics.Reporter { return diagnostics.NewUIReporter() }
 	nowForSession                    = func() time.Time { return time.Now().UTC() }
 )
 
@@ -131,13 +136,15 @@ func firstArg(args []string) string {
 
 func newSessionWorkflowDependencies() workflow.SessionDependencies {
 	return workflow.SessionDependencies{
-		LoadConfig:             loadRunConfigForSession,
-		DiscoverRepository:     discoverRepositoryForSession,
-		EnsureRuntime:          ensureRuntimeForSession,
-		ResolveRequestedAgent:  resolveRequestedAgent,
-		ShowSelectedAgent:      showSelectedAgent,
-		NewForgejoService:      func(kubeCtx string) (workflow.ImportService, error) { return newForgejoServiceForSession(kubeCtx) },
-		EnsureClusterResources: ensureClusterResourcesForSession,
+		LoadConfig:            loadRunConfigForSession,
+		DiscoverRepository:    discoverRepositoryForSession,
+		EnsureRuntime:         ensureRuntimeForSession,
+		ResolveRequestedAgent: resolveRequestedAgent,
+		ShowSelectedAgent:     showSelectedAgent,
+		NewForgejoService:     func(kubeCtx string) (workflow.ImportService, error) { return newForgejoServiceForSession(kubeCtx) },
+		EnsureNamespace:       ensureNamespaceForSession,
+		EnsureProxy:           ensureProxyForSession,
+		EnsureResources:       ensureResourcesForSession,
 		EnsureForgejoImport: func(ctx context.Context, svc workflow.ImportService, repo *git.Repository) error {
 			forgejoService, ok := svc.(*forgejo.ForgejoService)
 			if !ok {
@@ -148,8 +155,10 @@ func newSessionWorkflowDependencies() workflow.SessionDependencies {
 		},
 		ValidateProxyPolicy: validateProxyPolicyForSession,
 		LaunchAgentRuntime:  launchAgentRuntimeForSession,
+		PrepareAgentState:   prepareAgentStateForSession,
 		AttachAgent:         attachAgentForSession,
 		OpenSessionStore:    func() (workflow.SessionStore, error) { return openSessionStore() },
+		DiagnosticsReporter: newDiagnosticsReporterForSession(),
 		Now:                 nowForSession,
 	}
 }

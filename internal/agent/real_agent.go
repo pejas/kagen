@@ -45,6 +45,16 @@ func (b *baseAgent) Launch(ctx context.Context) error {
 	return nil
 }
 
+// Prepare ensures the runtime-specific state directory exists before attach.
+func (b *baseAgent) Prepare(ctx context.Context) error {
+	if b.exec == nil {
+		return nil
+	}
+
+	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
+	return b.ensureStatePath(ctx, ns)
+}
+
 // Attach connects the user's terminal to the agent process in the cluster.
 func (b *baseAgent) Attach(ctx context.Context) error {
 	if os.Getenv("KAGEN_NON_INTERACTIVE") == "true" {
@@ -54,16 +64,11 @@ func (b *baseAgent) Attach(ctx context.Context) error {
 		return nil
 	}
 
-	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
-	if err := b.ensureStatePath(ctx, ns); err != nil {
-		return err
-	}
-
 	// We use the same logic as KubeManager.AttachAgent but specialized here.
 	// In a real implementation, we'd look up the pod by labels.
 	podName := "agent" // Simplified for now, should be looked up
 
-	return b.exec.Attach(ctx, ns, podName, b.commandArgs(), kubeexec.WithContainer(b.containerName))
+	return b.exec.Attach(ctx, fmt.Sprintf("kagen-%s", b.repo.ID()), podName, b.commandArgs(), kubeexec.WithContainer(b.containerName))
 }
 
 func (b *baseAgent) commandArgs() []string {

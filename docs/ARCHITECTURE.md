@@ -73,7 +73,7 @@ The `kagen` binary drives a set of coordinators:
 ## Verification and Diagnostics
 - **Default Verification Loop**: Contributors should be able to trust `make build`, `make test`, and `make lint` as the fast default validation contract. CI should enforce the same contract.
 - **Intentional E2E Scope**: Runtime-backed E2E coverage stays narrow and explicit. Use `docs/E2E.md` to define what belongs in `make test-e2e` and what should remain integration-tested.
-- **Verbose Diagnostics**: Runtime bootstrap, Forgejo readiness, proxy readiness, and review transport lifecycle should expose richer detail behind `--verbose` without making normal command output noisy.
+- **Verbose Diagnostics**: Runtime bootstrap, Forgejo readiness, proxy readiness, and review transport lifecycle should expose richer detail behind `--verbose` without making normal command output noisy. `kagen start` and `kagen attach` emit an operation-scoped step trace in verbose mode with explicit phase names, timestamps, durations, and failed-step summaries.
 
 ## Architecture Improvement Plan (Executable)
 1. **Orchestration Decomposition**

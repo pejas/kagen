@@ -121,6 +121,8 @@ kagen start codex
   `--> attach to the requested agent
 ```
 
+With `--verbose`, the runtime-facing portion of this flow is reported as named steps such as `ensure_runtime`, `ensure_namespace`, `ensure_proxy`, `ensure_resources`, `forgejo_import`, `launch_agent_runtime`, `validate_proxy_policy`, `prepare_agent_state`, and `attach_agent`.
+
 Quick picture:
 
 ```text
@@ -150,6 +152,8 @@ kagen attach codex
   +--> persist a fresh agent session
   `--> attach that agent to the selected kagen session
 ```
+
+Failures in `start` and `attach` report the exact failed runtime step in the command error. This distinguishes attach preparation failures from workload or proxy failures.
 
 Important distinction:
 - A kagen session is the persisted workspace/runtime identity.

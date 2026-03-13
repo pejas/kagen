@@ -42,11 +42,21 @@ Welcome, Agent. This document provides the essential context and actionable inst
 7. **Surface Area**: Export only interfaces and constructors; keep helpers unexported where feasible.
 8. **Proxy Validation**: Validate proxy policy before agent attach; fail closed if unenforced.
 
+## Language and Style
+- Use precise, normative language in documentation, comments, plans, and review notes.
+- Write in British English with Oxford spelling.
+- Use `-ize` and `-ization` endings unless `-ise` is intrinsic to the word.
+- Prefer direct, active voice.
+- Avoid hype adjectives.
+- Avoid vague qualifiers such as "as needed" or "etc." in normative statements.
+- Keep sentences concise and technical.
+- Describe the current contract, not the change history. Do not use release-note phrasing such as "now", "currently now", or similar transition markers unless a time comparison is required.
+
 ## Agent Checklist
 - [ ] Always run `make test` before proposing a fix.
 - [ ] Run `make test-e2e` only when the task explicitly calls for e2e validation or the change needs end-to-end verification.
 - [ ] Ensure `internal/` packages do not expose unnecessary public APIs.
-- [ ] Follow Oxford spelling (British English) in documentation.
+- [ ] Follow the documented language and style rules in all written material.
 - [ ] Use `client-go` for K8s interactions; avoid shell-ing out to `kubectl` except for `exec` TUIs and port-forwarding.
 - [ ] Reuse shared port-forward/exec adapters; do not introduce new direct shell-outs to `kubectl`.
 

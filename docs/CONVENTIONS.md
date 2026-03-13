@@ -3,7 +3,14 @@
 ## Language & Style
 - **Go Version**: Match the version declared in `go.mod`; keep docs and tooling in sync with that source of truth.
 - **Uber Style Guide**: Follow the [Uber Go Style Guide](https://github.com/uber-go/guide/blob/master/style.md).
-- **British English**: Use Oxford spelling (e.g., 'organize', 'standardize', 'characterization') in all documentation and comments.
+- **Normative Language**: Write guidelines, contracts, and comments in precise, normative language.
+- **British English**: Use British English with Oxford spelling in all documentation and comments.
+- **`-ize` Forms**: Use `-ize` and `-ization` endings unless `-ise` is intrinsic to the word.
+- **Voice**: Prefer direct, active voice.
+- **Tone**: Avoid hype adjectives.
+- **Specificity**: Do not use vague qualifiers such as "as needed" or "etc." in normative statements.
+- **Sentence Form**: Keep sentences concise and technical.
+- **Contract Framing**: Describe the standing behaviour or requirement. Do not write documentation as a changelog.
 
 ## Error Handling
 - Use the `internal/errors` package for sentinel errors.

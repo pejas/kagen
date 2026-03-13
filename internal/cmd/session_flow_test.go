@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/config"
+	"github.com/pejas/kagen/internal/diagnostics"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/session"
@@ -75,6 +77,77 @@ func TestRunStartPersistsReadySessionAndAgent(t *testing.T) {
 	}
 	if got := summary.AgentSessions[0].StatePath; !strings.HasPrefix(got, "/home/kagen/.codex/") {
 		t.Fatalf("agent session state path = %q, want codex-scoped session path", got)
+	}
+}
+
+func TestRunStartRecordsSuccessfulRuntimeTrace(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	repo := &git.Repository{
+		Path:          t.TempDir(),
+		CurrentBranch: "main",
+		HeadSHA:       "abc123",
+	}
+
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		repo: repo,
+		cfg:  config.DefaultConfig(),
+		now:  time.Date(2026, time.March, 12, 15, 30, 0, 0, time.UTC),
+	})
+
+	if err := runStart(context.Background(), "codex"); err != nil {
+		t.Fatalf("runStart() returned error: %v", err)
+	}
+
+	if len(calls.operations) != 1 {
+		t.Fatalf("operation count = %d, want 1", len(calls.operations))
+	}
+
+	operation := calls.operations[0]
+	if operation.Name != "start" {
+		t.Fatalf("operation name = %q, want start", operation.Name)
+	}
+	if operation.Status != diagnostics.StatusSucceeded {
+		t.Fatalf("operation status = %q, want succeeded", operation.Status)
+	}
+	expectedSteps := []string{
+		"ensure_runtime",
+		"ensure_namespace",
+		"ensure_proxy",
+		"ensure_resources",
+		"forgejo_import",
+		"launch_agent_runtime",
+		"validate_proxy_policy",
+		"prepare_agent_state",
+		"attach_agent",
+	}
+	if len(operation.Steps) != len(expectedSteps) {
+		t.Fatalf("step count = %d, want %d", len(operation.Steps), len(expectedSteps))
+	}
+	for i, expectedStep := range expectedSteps {
+		if operation.Steps[i].Name != expectedStep {
+			t.Fatalf("step %d name = %q, want %q", i, operation.Steps[i].Name, expectedStep)
+		}
+		if operation.Steps[i].Status != diagnostics.StatusSucceeded {
+			t.Fatalf("step %s status = %q, want succeeded", operation.Steps[i].Name, operation.Steps[i].Status)
+		}
+	}
+	if operation.Metadata["agent_type"] != string(agent.Codex) {
+		t.Fatalf("operation metadata agent_type = %q, want codex", operation.Metadata["agent_type"])
+	}
+	if operation.Metadata["session_id"] == "" {
+		t.Fatal("operation metadata session_id is empty")
+	}
+	if operation.Metadata["namespace"] != "kagen-"+repo.ID() {
+		t.Fatalf("operation metadata namespace = %q, want %q", operation.Metadata["namespace"], "kagen-"+repo.ID())
+	}
+	prepareStep := operation.Steps[7]
+	if prepareStep.Metadata["agent_session_id"] == "" {
+		t.Fatal("prepare_agent_state metadata agent_session_id is empty")
+	}
+	if !strings.HasPrefix(prepareStep.Metadata["state_path"], "/home/kagen/.codex/") {
+		t.Fatalf("prepare_agent_state state_path = %q, want codex session path", prepareStep.Metadata["state_path"])
 	}
 }
 
@@ -389,6 +462,78 @@ func TestRunAttachCreatesDistinctAgentSessionsForSameAgentType(t *testing.T) {
 	}
 }
 
+func TestRunAttachFailureNamesFailedStepAndRecordsPendingTail(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	store, err := session.OpenDefault()
+	if err != nil {
+		t.Fatalf("OpenDefault() returned error: %v", err)
+	}
+
+	persisted, err := store.CreateKagenSession(context.Background(), session.CreateKagenSessionParams{
+		RepoID:          "repo-1",
+		RepoPath:        t.TempDir(),
+		BaseBranch:      "main",
+		WorkspaceBranch: "kagen/main",
+		HeadSHAAtStart:  "abc123",
+		Namespace:       "kagen-repo-1",
+		PodName:         "agent",
+		Status:          sessionStatusReady,
+		CreatedAt:       time.Date(2026, time.March, 12, 10, 0, 0, 0, time.UTC),
+		LastUsedAt:      time.Date(2026, time.March, 12, 10, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("CreateKagenSession() returned error: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() returned error: %v", err)
+	}
+
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		cfg:        config.DefaultConfig(),
+		now:        time.Date(2026, time.March, 12, 16, 30, 0, 0, time.UTC),
+		prepareErr: errors.New("permission denied"),
+	})
+
+	err = runAttach(context.Background(), "codex", persisted.ID, true)
+	if err == nil {
+		t.Fatal("runAttach() error = nil, want prepare_agent_state failure")
+	}
+	if !strings.Contains(err.Error(), "attach failed at step prepare_agent_state") {
+		t.Fatalf("runAttach() error = %v, want failed step name", err)
+	}
+
+	if len(calls.operations) != 1 {
+		t.Fatalf("operation count = %d, want 1", len(calls.operations))
+	}
+	operation := calls.operations[0]
+	if operation.Status != diagnostics.StatusFailed {
+		t.Fatalf("operation status = %q, want failed", operation.Status)
+	}
+	if operation.Steps[0].Status != diagnostics.StatusSucceeded {
+		t.Fatalf("ensure_runtime status = %q, want succeeded", operation.Steps[0].Status)
+	}
+	if operation.Steps[1].Status != diagnostics.StatusSucceeded {
+		t.Fatalf("launch_agent_runtime status = %q, want succeeded", operation.Steps[1].Status)
+	}
+	if operation.Steps[2].Status != diagnostics.StatusSucceeded {
+		t.Fatalf("validate_proxy_policy status = %q, want succeeded", operation.Steps[2].Status)
+	}
+	if operation.Steps[3].Status != diagnostics.StatusFailed {
+		t.Fatalf("prepare_agent_state status = %q, want failed", operation.Steps[3].Status)
+	}
+	if !strings.Contains(operation.Steps[3].ErrorSummary, "permission denied") {
+		t.Fatalf("prepare_agent_state error summary = %q, want permission denied", operation.Steps[3].ErrorSummary)
+	}
+	if operation.Steps[4].Status != diagnostics.StatusPending {
+		t.Fatalf("attach_agent status = %q, want pending", operation.Steps[4].Status)
+	}
+	if calls.attaches != 0 {
+		t.Fatalf("attach count = %d, want 0", calls.attaches)
+	}
+}
+
 func TestResolveRequestedAgentUsesConfigDefault(t *testing.T) {
 	got, err := resolveRequestedAgent("", nil, "", &config.Config{Agent: "codex"}, false)
 	if err != nil {
@@ -433,30 +578,44 @@ func TestRootCommandShowsHelpInsteadOfCompatibilityStart(t *testing.T) {
 }
 
 type sessionFlowStubOptions struct {
-	repo *git.Repository
-	cfg  *config.Config
-	now  time.Time
+	repo               *git.Repository
+	cfg                *config.Config
+	now                time.Time
+	ensureNamespaceErr error
+	ensureProxyErr     error
+	ensureResourcesErr error
+	validateErr        error
+	launchErr          error
+	prepareErr         error
+	attachErr          error
 }
 
 type sessionFlowCalls struct {
-	launches int
-	attaches int
+	launches   int
+	prepares   int
+	attaches   int
+	operations []diagnostics.Operation
 }
 
 func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCalls {
 	t.Helper()
 
 	calls := &sessionFlowCalls{}
+	reporter := &captureDiagnosticsReporter{calls: calls}
 
 	originalDiscover := discoverRepositoryForSession
 	originalLoadConfig := loadRunConfigForSession
 	originalEnsureRuntime := ensureRuntimeForSession
 	originalNewForgejoService := newForgejoServiceForSession
-	originalEnsureClusterResources := ensureClusterResourcesForSession
+	originalEnsureNamespace := ensureNamespaceForSession
+	originalEnsureProxy := ensureProxyForSession
+	originalEnsureResources := ensureResourcesForSession
 	originalEnsureForgejoImport := ensureForgejoImportForSession
 	originalValidateProxyPolicy := validateProxyPolicyForSession
 	originalLaunchAgentRuntime := launchAgentRuntimeForSession
+	originalPrepareAgentState := prepareAgentStateForSession
 	originalAttachAgent := attachAgentForSession
+	originalReporter := newDiagnosticsReporterForSession
 	originalNow := nowForSession
 
 	t.Cleanup(func() {
@@ -464,11 +623,15 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 		loadRunConfigForSession = originalLoadConfig
 		ensureRuntimeForSession = originalEnsureRuntime
 		newForgejoServiceForSession = originalNewForgejoService
-		ensureClusterResourcesForSession = originalEnsureClusterResources
+		ensureNamespaceForSession = originalEnsureNamespace
+		ensureProxyForSession = originalEnsureProxy
+		ensureResourcesForSession = originalEnsureResources
 		ensureForgejoImportForSession = originalEnsureForgejoImport
 		validateProxyPolicyForSession = originalValidateProxyPolicy
 		launchAgentRuntimeForSession = originalLaunchAgentRuntime
+		prepareAgentStateForSession = originalPrepareAgentState
 		attachAgentForSession = originalAttachAgent
+		newDiagnosticsReporterForSession = originalReporter
 		nowForSession = originalNow
 	})
 
@@ -492,23 +655,34 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 	newForgejoServiceForSession = func(string) (*forgejo.ForgejoService, error) {
 		return nil, nil
 	}
-	ensureClusterResourcesForSession = func(_ context.Context, _ string, _ *git.Repository, _ *config.Config, _ agent.Type) error {
-		return nil
+	ensureNamespaceForSession = func(_ context.Context, _ string, _ *git.Repository, _ agent.Type) error {
+		return opts.ensureNamespaceErr
+	}
+	ensureProxyForSession = func(_ context.Context, _ string, _ *git.Repository, _ *config.Config, _ agent.Type) error {
+		return opts.ensureProxyErr
+	}
+	ensureResourcesForSession = func(_ context.Context, _ string, _ *git.Repository, _ *config.Config, _ agent.Type) error {
+		return opts.ensureResourcesErr
 	}
 	ensureForgejoImportForSession = func(_ context.Context, _ *forgejo.ForgejoService, _ *git.Repository) error {
 		return nil
 	}
 	validateProxyPolicyForSession = func(_ context.Context, _ string, _ *git.Repository, _ *config.Config, _ agent.Type) error {
-		return nil
+		return opts.validateErr
 	}
 	launchAgentRuntimeForSession = func(_ context.Context, _ *git.Repository, _ string, _ agent.Type) error {
 		calls.launches++
-		return nil
+		return opts.launchErr
+	}
+	prepareAgentStateForSession = func(_ context.Context, _ *git.Repository, _ string, _ agent.Type, _ session.AgentSession) error {
+		calls.prepares++
+		return opts.prepareErr
 	}
 	attachAgentForSession = func(_ context.Context, _ *git.Repository, _ string, _ agent.Type, _ session.AgentSession) error {
 		calls.attaches++
-		return nil
+		return opts.attachErr
 	}
+	newDiagnosticsReporterForSession = func() diagnostics.Reporter { return reporter }
 	nowForSession = func() time.Time {
 		if opts.now.IsZero() {
 			return time.Date(2026, time.March, 12, 19, 0, 0, 0, time.UTC)
@@ -518,4 +692,14 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 	}
 
 	return calls
+}
+
+type captureDiagnosticsReporter struct {
+	calls *sessionFlowCalls
+}
+
+func (r *captureDiagnosticsReporter) StepStarted(diagnostics.Operation, diagnostics.StepRecord) {}
+
+func (r *captureDiagnosticsReporter) OperationFinished(operation diagnostics.Operation) {
+	r.calls.operations = append(r.calls.operations, operation)
 }

@@ -115,15 +115,8 @@ func ensureForgejoImport(ctx context.Context, svc *forgejo.ForgejoService, repo 
 	return nil
 }
 
-func ensureClusterResources(
-	ctx context.Context,
-	kubeCtx string,
-	repo *git.Repository,
-	cfg *config.Config,
-	agentType agent.Type,
-) error {
+func ensureNamespace(ctx context.Context, kubeCtx string, repo *git.Repository, agentType agent.Type) error {
 	ui.Info("Ensuring cluster resources for %s/%s...", agentType, repo.CurrentBranch)
-	ui.Verbose("Reconciling namespace kagen-%s", repo.ID())
 	manager, err := cluster.NewKubeManager(kubeCtx)
 	if err != nil {
 		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
@@ -131,6 +124,22 @@ func ensureClusterResources(
 	if err := manager.EnsureNamespace(ctx, repo); err != nil {
 		return fmt.Errorf("ensuring namespace: %w", err)
 	}
+
+	return nil
+}
+
+func ensureProxy(
+	ctx context.Context,
+	kubeCtx string,
+	repo *git.Repository,
+	cfg *config.Config,
+	agentType agent.Type,
+) error {
+	manager, err := cluster.NewKubeManager(kubeCtx)
+	if err != nil {
+		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
+	}
+
 	policy := proxy.LoadPolicy(cfg, string(agentType))
 	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
 		return fmt.Errorf("ensuring proxy: %w", err)
@@ -140,6 +149,23 @@ func ensureClusterResources(
 	} else {
 		ui.Verbose("Proxy policy requires %d allowed destination(s)", len(policy.AllowedDestinations))
 	}
+
+	return nil
+}
+
+func ensureResources(
+	ctx context.Context,
+	kubeCtx string,
+	repo *git.Repository,
+	cfg *config.Config,
+	agentType agent.Type,
+) error {
+	manager, err := cluster.NewKubeManager(kubeCtx)
+	if err != nil {
+		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
+	}
+
+	policy := proxy.LoadPolicy(cfg, string(agentType))
 	pod, err := buildRuntimePod(repo, cfg, agentType)
 	if err != nil {
 		return err
@@ -201,6 +227,23 @@ func launchAgentRuntime(ctx context.Context, repo *git.Repository, kubeCtx strin
 	}
 
 	return nil
+}
+
+func prepareAgentState(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type, agentSession session.AgentSession) error {
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return err
+	}
+
+	registry := agent.NewRegistry(repo, kubeCtx).
+		WithContainer(spec.ContainerName()).
+		WithStatePath(agentSession.StatePath)
+	a, err := registry.Get(agentType)
+	if err != nil {
+		return err
+	}
+
+	return a.Prepare(ctx)
 }
 
 func attachAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type, agentSession session.AgentSession) error {
