@@ -123,6 +123,12 @@ kagen start codex
 
 With `--verbose`, the runtime-facing portion of this flow is reported as named steps such as `ensure_runtime`, `ensure_namespace`, `ensure_proxy`, `ensure_resources`, `forgejo_import`, `launch_agent_runtime`, `validate_proxy_policy`, `prepare_agent_state`, and `attach_agent`.
 
+If a runtime step fails after session persistence, `kagen` also writes failure artefacts to a deterministic directory under the user config directory:
+
+- `kagen/failure-artefacts/session-<id>/`
+- files include `<operation>-failure.json`, `<operation>-trace.json`, `<operation>-trace.txt`, `<operation>-session-summary.json`, pod snapshots, pod events, `workspace-sync` logs, agent container logs, and proxy deployment state when available
+- a start failure before session persistence falls back to `kagen/failure-artefacts/pending/<repo-id>/start/`
+
 Quick picture:
 
 ```text
@@ -154,6 +160,8 @@ kagen attach codex
 ```
 
 Failures in `start` and `attach` report the exact failed runtime step in the command error. This distinguishes attach preparation failures from workload or proxy failures.
+
+Attach failures also print the captured artefact directory so you can inspect the latest machine-readable session diagnostics without manual cluster inspection.
 
 Important distinction:
 - A kagen session is the persisted workspace/runtime identity.

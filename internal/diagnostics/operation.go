@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	kagerr "github.com/pejas/kagen/internal/errors"
 )
 
 type StepStatus string
@@ -23,6 +25,7 @@ type StepRecord struct {
 	FinishedAt   time.Time
 	Duration     time.Duration
 	ErrorSummary string
+	FailureClass kagerr.FailureClass
 	Metadata     map[string]string
 }
 
@@ -46,6 +49,7 @@ type Recorder struct {
 	reporter Reporter
 	current  Operation
 	indices  map[string]int
+	reported bool
 }
 
 type StepContext struct {
@@ -54,9 +58,10 @@ type StepContext struct {
 }
 
 type StepError struct {
-	Operation string
-	Step      string
-	Err       error
+	Operation    string
+	Step         string
+	FailureClass kagerr.FailureClass
+	Err          error
 }
 
 func (e *StepError) Error() string {
@@ -163,15 +168,21 @@ func (r *Recorder) RunStep(name string, run func(*StepContext) error) error {
 	if err != nil {
 		step.Status = StatusFailed
 		step.ErrorSummary = err.Error()
+		step.FailureClass = kagerr.Classify(err)
 		r.current.Status = StatusFailed
+		if step.FailureClass != "" {
+			step.Metadata["failure_class"] = string(step.FailureClass)
+		}
 		return &StepError{
-			Operation: r.current.Name,
-			Step:      name,
-			Err:       err,
+			Operation:    r.current.Name,
+			Step:         name,
+			FailureClass: step.FailureClass,
+			Err:          err,
 		}
 	}
 
 	step.Status = StatusSucceeded
+	step.FailureClass = ""
 	return nil
 }
 
@@ -196,8 +207,9 @@ func (r *Recorder) Complete() Operation {
 	}
 
 	snapshot := r.Snapshot()
-	if r.reporter != nil {
+	if r.reporter != nil && !r.reported {
 		r.reporter.OperationFinished(snapshot)
+		r.reported = true
 	}
 
 	return snapshot
@@ -267,6 +279,9 @@ func FormatSummary(operation Operation) []string {
 		case StatusPending:
 		default:
 			line += " (" + formatDuration(step.Duration) + ")"
+		}
+		if step.FailureClass != "" {
+			line += " [" + string(step.FailureClass) + "]"
 		}
 		if step.ErrorSummary != "" {
 			line += ": " + step.ErrorSummary

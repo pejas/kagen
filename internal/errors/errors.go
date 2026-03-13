@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Sentinel errors for well-known failure conditions.
@@ -20,6 +21,76 @@ var (
 	ErrNoReviewableChanges = errors.New("no reviewable changes found")
 	ErrAgentUnknown        = errors.New("unknown agent type")
 )
+
+// FailureClass describes a machine-readable runtime failure category.
+type FailureClass string
+
+const (
+	FailureClassImage              FailureClass = "image_error"
+	FailureClassWorkspaceBootstrap FailureClass = "workspace_bootstrap_error"
+	FailureClassProxy              FailureClass = "proxy_error"
+	FailureClassAgentBinary        FailureClass = "agent_binary_error"
+	FailureClassAgentHome          FailureClass = "agent_home_error"
+	FailureClassAttach             FailureClass = "attach_error"
+)
+
+// ClassifiedError wraps an error with a stable failure class.
+type ClassifiedError struct {
+	Class   FailureClass
+	Summary string
+	Err     error
+}
+
+// Error implements the error interface.
+func (e *ClassifiedError) Error() string {
+	if e == nil {
+		return ""
+	}
+
+	summary := strings.TrimSpace(e.Summary)
+	switch {
+	case summary != "" && e.Err != nil:
+		return fmt.Sprintf("%s: %v", summary, e.Err)
+	case summary != "":
+		return summary
+	case e.Err != nil:
+		return e.Err.Error()
+	default:
+		return ""
+	}
+}
+
+// Unwrap supports errors.Is / errors.As chains.
+func (e *ClassifiedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+
+	return e.Err
+}
+
+// WithFailureClass wraps err with a stable failure class and summary.
+func WithFailureClass(class FailureClass, summary string, err error) error {
+	if class == "" {
+		return err
+	}
+
+	return &ClassifiedError{
+		Class:   class,
+		Summary: summary,
+		Err:     err,
+	}
+}
+
+// Classify extracts the stable failure class from err when present.
+func Classify(err error) FailureClass {
+	var classified *ClassifiedError
+	if errors.As(err, &classified) {
+		return classified.Class
+	}
+
+	return ""
+}
 
 // ExitError wraps an error with a specific process exit code.
 type ExitError struct {

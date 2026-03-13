@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
+	"github.com/pejas/kagen/internal/config"
+	kruntime "github.com/pejas/kagen/internal/runtime"
 )
 
 type testContext struct {
@@ -156,16 +158,11 @@ func (c *testContext) theFileExists(filename string) error {
 }
 
 func (c *testContext) colimaIsRunning() error {
-	cmd := exec.Command("colima", "status", "-p", "kagen")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		// If it's not running, we try without -p kagen just in case
-		cmd = exec.Command("colima", "status")
-		out, _ = cmd.CombinedOutput()
+	manager := kruntime.NewColimaManager(config.DefaultConfig().Runtime)
+	if err := manager.EnsureRunning(context.Background()); err != nil {
+		return fmt.Errorf("ensuring colima runtime is running: %w", err)
 	}
-	if !strings.Contains(strings.ToLower(string(out)), "running") {
-		return fmt.Errorf("colima is not running: %s", string(out))
-	}
+
 	return nil
 }
 
@@ -287,9 +284,12 @@ func namespaceForTmpDir(tmpDir string) string {
 }
 
 func cleanupE2ENamespaces() error {
-	cmd := exec.Command("kubectl", "get", "ns", "-l", "kagen.io/e2e=true", "-o", "name")
+	cmd := exec.Command("kubectl", "--context", e2eKubeContext, "get", "ns", "-l", "kagen.io/e2e=true", "-o", "name")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if clusterUnavailable(string(out)) {
+			return nil
+		}
 		return fmt.Errorf("listing e2e namespaces: %s: %w", string(out), err)
 	}
 
@@ -307,15 +307,21 @@ func cleanupE2ENamespaces() error {
 }
 
 func cleanupNamespace(ns string) error {
-	deleteCmd := exec.Command("kubectl", "delete", "ns", ns, "--ignore-not-found=true", "--wait=false")
+	deleteCmd := exec.Command("kubectl", "--context", e2eKubeContext, "delete", "ns", ns, "--ignore-not-found=true", "--wait=false")
 	if out, err := deleteCmd.CombinedOutput(); err != nil {
+		if clusterUnavailable(string(out)) {
+			return nil
+		}
 		return fmt.Errorf("deleting namespace %s: %s: %w", ns, string(out), err)
 	}
 
-	waitCmd := exec.Command("kubectl", "wait", "--for=delete", "ns/"+ns, "--timeout=90s")
+	waitCmd := exec.Command("kubectl", "--context", e2eKubeContext, "wait", "--for=delete", "ns/"+ns, "--timeout=90s")
 	if out, err := waitCmd.CombinedOutput(); err != nil {
 		waitOutput := string(out)
 		if strings.Contains(waitOutput, "not found") {
+			return nil
+		}
+		if clusterUnavailable(waitOutput) {
 			return nil
 		}
 		return fmt.Errorf("waiting for namespace %s deletion: %s: %w", ns, waitOutput, err)
@@ -323,4 +329,20 @@ func cleanupNamespace(ns string) error {
 
 	time.Sleep(500 * time.Millisecond)
 	return nil
+}
+
+func clusterUnavailable(output string) bool {
+	trimmed := strings.TrimSpace(output)
+	switch {
+	case trimmed == "":
+		return false
+	case strings.Contains(trimmed, "localhost:8080"):
+		return true
+	case strings.Contains(trimmed, "The connection to the server"):
+		return true
+	case strings.Contains(trimmed, "connection refused"):
+		return true
+	default:
+		return false
+	}
 }

@@ -19,12 +19,18 @@ The toolbox baseline is declared in:
 Runtime startup assumes those artefacts are prebuilt. The agent pod and proxy
 pod no longer install packages during container startup.
 
+`kagen start` validates the resolved workspace, toolbox, and proxy image
+references before it persists a new session. A malformed override should fail
+the preflight path with `image_error` rather than stalling later in runtime
+launch.
+
 ## Ownership
 
 - `internal/workload` is the source of truth for baseline agent pod images.
 - `internal/cluster` is the source of truth for the proxy image used by the enforced egress path.
 - `packaging/runtime-images/` contains the Dockerfiles and `mise` inputs used to build future first-party runtime artefacts.
 - Local validation can override the default refs with `KAGEN_WORKSPACE_IMAGE`, `KAGEN_TOOLBOX_IMAGE`, and `KAGEN_PROXY_IMAGE`.
+- Runtime preflight validates only launch-critical shape and resolution. It does not repair bad image refs, publish artefacts, or replace runtime-backed verification.
 
 ## Update Procedure
 

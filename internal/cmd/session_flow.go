@@ -13,6 +13,7 @@ import (
 	"github.com/pejas/kagen/internal/diagnostics"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/preflight"
 	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/session"
 	"github.com/pejas/kagen/internal/ui"
@@ -40,23 +41,35 @@ var (
 		return session.OpenDefault()
 	}
 
-	discoverRepositoryForSession     = discoverRepository
-	loadRunConfigForSession          = loadRunConfig
-	ensureRuntimeForSession          = ensureRuntime
-	newForgejoServiceForSession      = newForgejoService
-	ensureNamespaceForSession        = ensureNamespace
-	ensureProxyForSession            = ensureProxy
-	ensureResourcesForSession        = ensureResources
-	ensureForgejoImportForSession    = ensureForgejoImport
-	validateProxyPolicyForSession    = validateProxyPolicy
-	launchAgentRuntimeForSession     = launchAgentRuntime
-	prepareAgentStateForSession      = prepareAgentState
-	attachAgentForSession            = attachAgent
-	newDiagnosticsReporterForSession = func() diagnostics.Reporter { return diagnostics.NewUIReporter() }
-	nowForSession                    = func() time.Time { return time.Now().UTC() }
+	discoverRepositoryForSession        = discoverRepository
+	loadRunConfigForSession             = loadRunConfig
+	ensureRuntimeForSession             = ensureRuntime
+	newForgejoServiceForSession         = newForgejoService
+	ensureNamespaceForSession           = ensureNamespace
+	ensureProxyForSession               = ensureProxy
+	ensureResourcesForSession           = ensureResources
+	ensureForgejoImportForSession       = ensureForgejoImport
+	runConfigurationPreflightForSession = runConfigurationPreflight
+	runRuntimePreflightForSession       = runRuntimePreflight
+	validateProxyPolicyForSession       = validateProxyPolicy
+	launchAgentRuntimeForSession        = launchAgentRuntime
+	prepareAgentStateForSession         = prepareAgentState
+	attachAgentForSession               = attachAgent
+	newDiagnosticsReporterForSession    = func() diagnostics.Reporter {
+		return diagnostics.NewCompositeReporter(
+			diagnostics.NewUIReporter(),
+			diagnostics.NewLatestOperationReporter(diagnostics.NewLatestOperationStore()),
+		)
+	}
+	newFailureArtefactCollectorForSession = func() diagnostics.FailureArtefactCollector {
+		return diagnostics.NewFailureArtefactCollector()
+	}
+	nowForSession = func() time.Time { return time.Now().UTC() }
 )
 
 func newStartCommand() *cobra.Command {
+	var detach bool
+
 	cmd := &cobra.Command{
 		Use:   "start <agent>",
 		Short: "Create a new kagen session and attach an agent",
@@ -65,9 +78,10 @@ ensures the runtime, Forgejo, and workload are ready, then attaches the
 requested agent.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStart(cmd.Context(), firstArg(args))
+			return runStart(cmd.Context(), firstArg(args), detach)
 		},
 	}
+	cmd.Flags().BoolVar(&detach, "detach", false, "launch the runtime and leave the session ready without interactive attach")
 
 	return cmd
 }
@@ -93,8 +107,10 @@ is selected automatically.`,
 	return cmd
 }
 
-func runStart(ctx context.Context, explicitAgent string) error {
-	return workflow.NewStartWorkflow(newSessionWorkflowDependencies()).Run(ctx, explicitAgent)
+func runStart(ctx context.Context, explicitAgent string, detach bool) error {
+	return workflow.NewStartWorkflow(newSessionWorkflowDependencies()).Run(ctx, explicitAgent, workflow.StartOptions{
+		Detach: detach,
+	})
 }
 
 func runAttach(ctx context.Context, explicitAgent string, sessionID int64, sessionSelected bool) error {
@@ -153,12 +169,19 @@ func newSessionWorkflowDependencies() workflow.SessionDependencies {
 
 			return ensureForgejoImportForSession(ctx, forgejoService, repo)
 		},
+		RunConfigurationPreflight: func(ctx context.Context, repo *git.Repository, cfg *config.Config, agentType agent.Type) (preflight.Report, error) {
+			return runConfigurationPreflightForSession(ctx, repo, cfg, agentType)
+		},
+		RunRuntimePreflight: func(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type) (preflight.Report, error) {
+			return runRuntimePreflightForSession(ctx, repo, kubeCtx, agentType)
+		},
 		ValidateProxyPolicy: validateProxyPolicyForSession,
 		LaunchAgentRuntime:  launchAgentRuntimeForSession,
 		PrepareAgentState:   prepareAgentStateForSession,
 		AttachAgent:         attachAgentForSession,
 		OpenSessionStore:    func() (workflow.SessionStore, error) { return openSessionStore() },
 		DiagnosticsReporter: newDiagnosticsReporterForSession(),
+		FailureArtefacts:    newFailureArtefactCollectorForSession(),
 		Now:                 nowForSession,
 	}
 }

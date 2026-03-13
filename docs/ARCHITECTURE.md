@@ -51,12 +51,14 @@ The `kagen` binary drives a set of coordinators:
    - Runtime coordinator: dependency check + ensure Colima profile running.
    - Config coordinator: load and validate defaults from built-ins, environment, and optional `.kagen.yaml`, including proxy allowlist.
    - Git discovery: identify repo, branch, head SHA, repo ID.
+   - Preflight coordinator: validate resolved image references before a new session is persisted.
    - Forgejo coordinator: ensure deployment/service/PVC, admin user, and repo stub exist.
    - Workload builder: generate the baseline Pod for the requested runtime.
    - Cluster coordinator: inject workspace sync init container, ensure PVCs, create Pod.
    - Session coordinator: persist the kagen session and nested agent session metadata.
-   - Agent coordinator: wait for Pod readiness, verify the prebuilt runtime is ready (for example Codex is already on `PATH`), then attach via shared exec adapter.
-3. **Attach/List**: `kagen attach <agent> [--session <id>]` reuses a persisted session, defaults to the most recent ready session for the current repository when `--session` is omitted, and creates a fresh agent session. `kagen list` reads persisted session summaries after CLI restart.
+   - Agent coordinator: wait for Pod readiness, run runtime preflight checks for workspace mount, agent binary, and agent home writability, validate proxy enforcement, then attach via shared exec adapter.
+   - `kagen start --detach <agent>` follows the same path through runtime readiness and session preparation, marks the persisted session ready, and exits before interactive attach so automation can verify a clean non-interactive success boundary.
+3. **Attach/List**: `kagen attach <agent> [--session <id>]` reuses a persisted session, defaults to the most recent ready session for the current repository when `--session` is omitted, runs the same runtime preflight and proxy validation gates, and creates a fresh agent session. This is the follow-on path after `kagen start --detach` when a human wants to enter the prepared runtime later. `kagen list` reads persisted session summaries after CLI restart.
 4. **Work**: Agent TUI operates inside the Pod. Exiting the TUI with `/exit` or `/quit` only detaches from the agent process.
 5. **Shutdown**: `kagen down` stops the whole Colima/K3s runtime environment without deleting persisted kagen sessions or agent sessions from the local store.
 6. **Checkpoint**: Agent-side pushes to Forgejo; host-side provenance recorded.
@@ -73,7 +75,9 @@ The `kagen` binary drives a set of coordinators:
 ## Verification and Diagnostics
 - **Default Verification Loop**: Contributors should be able to trust `make build`, `make test`, and `make lint` as the fast default validation contract. CI should enforce the same contract.
 - **Intentional E2E Scope**: Runtime-backed E2E coverage stays narrow and explicit. Use `docs/E2E.md` to define what belongs in `make test-e2e` and what should remain integration-tested.
-- **Verbose Diagnostics**: Runtime bootstrap, Forgejo readiness, proxy readiness, and review transport lifecycle should expose richer detail behind `--verbose` without making normal command output noisy. `kagen start` and `kagen attach` emit an operation-scoped step trace in verbose mode with explicit phase names, timestamps, durations, and failed-step summaries.
+- **Verbose Diagnostics**: Runtime bootstrap, preflight validation, Forgejo readiness, proxy readiness, and review transport lifecycle should expose richer detail behind `--verbose` without making normal command output noisy. `kagen start` and `kagen attach` emit an operation-scoped step trace in verbose mode with explicit phase names, timestamps, durations, failed-step summaries, and typed failure classes for known launch prerequisites.
+- **Doctor Command**: `kagen doctor` should stay read-only. It resolves a persisted session, prints the latest persisted operation trace, reports the stored session status, inspects the runtime pod and proxy deployment only when the runtime is already running, and surfaces the deterministic failure artefact directory when present.
+- **Failure Artefacts**: Failed `kagen start` and `kagen attach` runs should write deterministic, machine-readable artefacts under the user config directory at `kagen/failure-artefacts/session-<id>/`. The capture set includes the latest step trace, session summary, pod status snapshot, pod events snapshot, `workspace-sync` logs, agent container logs, proxy deployment readiness, selected image references, and the derived failure class. Start failures that happen before a persisted session exists fall back to `kagen/failure-artefacts/pending/<repo-id>/start/`.
 
 ## Architecture Improvement Plan (Executable)
 1. **Orchestration Decomposition**

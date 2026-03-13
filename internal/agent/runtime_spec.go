@@ -115,9 +115,36 @@ func (s RuntimeSpec) ToolboxBootstrapArgs() []string {
 func (s RuntimeSpec) ReadyCheck() string {
 	return strings.Join([]string{
 		`test -d /projects/workspace/.git`,
+		s.BinaryReadyCheck(),
+	}, " && ")
+}
+
+func (s RuntimeSpec) BinaryReadyCheck() string {
+	return strings.Join([]string{
 		s.resolveBinaryShell("KAGEN_AGENT_BIN"),
 		`test -n "$KAGEN_AGENT_BIN"`,
+		`test -x "$KAGEN_AGENT_BIN"`,
 	}, " && ")
+}
+
+func (s RuntimeSpec) BinaryPreflightCheck() string {
+	return strings.Join([]string{
+		s.BinaryReadyCheck(),
+		`printf '%s' "$KAGEN_AGENT_BIN"`,
+	}, " && ")
+}
+
+func (s RuntimeSpec) StateRoot() string {
+	switch s.Type {
+	case Codex:
+		return defaultHomeDir + "/.codex"
+	case Claude:
+		return defaultHomeDir + "/.claude"
+	case OpenCode:
+		return defaultHomeDir + "/.opencode"
+	default:
+		return defaultHomeDir
+	}
 }
 
 func (s RuntimeSpec) RequiredEnvMap() map[string]string {

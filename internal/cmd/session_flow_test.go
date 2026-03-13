@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +14,10 @@ import (
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/config"
 	"github.com/pejas/kagen/internal/diagnostics"
+	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/preflight"
 	"github.com/pejas/kagen/internal/session"
 )
 
@@ -34,7 +38,7 @@ func TestRunStartPersistsReadySessionAndAgent(t *testing.T) {
 		now:  attachedAt,
 	})
 
-	if err := runStart(context.Background(), "codex"); err != nil {
+	if err := runStart(context.Background(), "codex", false); err != nil {
 		t.Fatalf("runStart() returned error: %v", err)
 	}
 
@@ -96,7 +100,7 @@ func TestRunStartRecordsSuccessfulRuntimeTrace(t *testing.T) {
 		now:  time.Date(2026, time.March, 12, 15, 30, 0, 0, time.UTC),
 	})
 
-	if err := runStart(context.Background(), "codex"); err != nil {
+	if err := runStart(context.Background(), "codex", false); err != nil {
 		t.Fatalf("runStart() returned error: %v", err)
 	}
 
@@ -113,11 +117,13 @@ func TestRunStartRecordsSuccessfulRuntimeTrace(t *testing.T) {
 	}
 	expectedSteps := []string{
 		"ensure_runtime",
+		"preflight_configuration",
 		"ensure_namespace",
 		"ensure_proxy",
 		"ensure_resources",
 		"forgejo_import",
 		"launch_agent_runtime",
+		"preflight_runtime",
 		"validate_proxy_policy",
 		"prepare_agent_state",
 		"attach_agent",
@@ -142,12 +148,87 @@ func TestRunStartRecordsSuccessfulRuntimeTrace(t *testing.T) {
 	if operation.Metadata["namespace"] != "kagen-"+repo.ID() {
 		t.Fatalf("operation metadata namespace = %q, want %q", operation.Metadata["namespace"], "kagen-"+repo.ID())
 	}
-	prepareStep := operation.Steps[7]
+	prepareStep := operation.Steps[9]
 	if prepareStep.Metadata["agent_session_id"] == "" {
 		t.Fatal("prepare_agent_state metadata agent_session_id is empty")
 	}
 	if !strings.HasPrefix(prepareStep.Metadata["state_path"], "/home/kagen/.codex/") {
 		t.Fatalf("prepare_agent_state state_path = %q, want codex session path", prepareStep.Metadata["state_path"])
+	}
+}
+
+func TestStartCommandDetachPersistsReadySessionWithoutAttach(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	repo := &git.Repository{
+		Path:          t.TempDir(),
+		CurrentBranch: "main",
+		HeadSHA:       "abc123",
+	}
+
+	readyAt := time.Date(2026, time.March, 12, 15, 45, 0, 0, time.UTC)
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		repo: repo,
+		cfg:  config.DefaultConfig(),
+		now:  readyAt,
+	})
+
+	cmd := newStartCommand()
+	cmd.SetArgs([]string{"--detach", "codex"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("start --detach returned error: %v", err)
+	}
+
+	if calls.launches != 1 {
+		t.Fatalf("launch count = %d, want 1", calls.launches)
+	}
+	if calls.prepares != 1 {
+		t.Fatalf("prepare count = %d, want 1", calls.prepares)
+	}
+	if calls.attaches != 0 {
+		t.Fatalf("attach count = %d, want 0", calls.attaches)
+	}
+	if len(calls.operations) != 1 {
+		t.Fatalf("operation count = %d, want 1", len(calls.operations))
+	}
+
+	operation := calls.operations[0]
+	if operation.Metadata["start_mode"] != "detached" {
+		t.Fatalf("operation start_mode = %q, want detached", operation.Metadata["start_mode"])
+	}
+	for _, step := range operation.Steps {
+		if step.Name == "attach_agent" {
+			t.Fatal("detached start recorded attach_agent step, want no attach boundary step")
+		}
+	}
+
+	store, err := session.OpenDefault()
+	if err != nil {
+		t.Fatalf("OpenDefault() returned error: %v", err)
+	}
+	defer store.Close()
+
+	summaries, err := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
+	if err != nil {
+		t.Fatalf("List() returned error: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("len(List()) = %d, want 1", len(summaries))
+	}
+
+	summary := summaries[0]
+	if summary.Session.Status != sessionStatusReady {
+		t.Fatalf("session status = %q, want %q", summary.Session.Status, sessionStatusReady)
+	}
+	if len(summary.AgentSessions) != 1 {
+		t.Fatalf("len(agent sessions) = %d, want 1", len(summary.AgentSessions))
+	}
+	if !summary.Session.LastUsedAt.Equal(readyAt) {
+		t.Fatalf("last_used_at = %s, want %s", summary.Session.LastUsedAt, readyAt)
+	}
+	if got := summary.AgentSessions[0].StatePath; !strings.HasPrefix(got, "/home/kagen/.codex/") {
+		t.Fatalf("agent session state path = %q, want codex session path", got)
 	}
 }
 
@@ -493,7 +574,7 @@ func TestRunAttachFailureNamesFailedStepAndRecordsPendingTail(t *testing.T) {
 	calls := stubSessionFlow(t, sessionFlowStubOptions{
 		cfg:        config.DefaultConfig(),
 		now:        time.Date(2026, time.March, 12, 16, 30, 0, 0, time.UTC),
-		prepareErr: errors.New("permission denied"),
+		prepareErr: kagerr.WithFailureClass(kagerr.FailureClassAgentHome, "preparing agent state path", errors.New("permission denied")),
 	})
 
 	err = runAttach(context.Background(), "codex", persisted.ID, true)
@@ -518,19 +599,123 @@ func TestRunAttachFailureNamesFailedStepAndRecordsPendingTail(t *testing.T) {
 		t.Fatalf("launch_agent_runtime status = %q, want succeeded", operation.Steps[1].Status)
 	}
 	if operation.Steps[2].Status != diagnostics.StatusSucceeded {
+		t.Fatalf("preflight_runtime status = %q, want succeeded", operation.Steps[2].Status)
+	}
+	if operation.Steps[3].Status != diagnostics.StatusSucceeded {
 		t.Fatalf("validate_proxy_policy status = %q, want succeeded", operation.Steps[2].Status)
 	}
-	if operation.Steps[3].Status != diagnostics.StatusFailed {
-		t.Fatalf("prepare_agent_state status = %q, want failed", operation.Steps[3].Status)
+	if operation.Steps[4].Status != diagnostics.StatusFailed {
+		t.Fatalf("prepare_agent_state status = %q, want failed", operation.Steps[4].Status)
 	}
-	if !strings.Contains(operation.Steps[3].ErrorSummary, "permission denied") {
-		t.Fatalf("prepare_agent_state error summary = %q, want permission denied", operation.Steps[3].ErrorSummary)
+	if operation.Steps[4].FailureClass != kagerr.FailureClassAgentHome {
+		t.Fatalf("prepare_agent_state failure class = %q, want %q", operation.Steps[4].FailureClass, kagerr.FailureClassAgentHome)
 	}
-	if operation.Steps[4].Status != diagnostics.StatusPending {
-		t.Fatalf("attach_agent status = %q, want pending", operation.Steps[4].Status)
+	if !strings.Contains(operation.Steps[4].ErrorSummary, "permission denied") {
+		t.Fatalf("prepare_agent_state error summary = %q, want permission denied", operation.Steps[4].ErrorSummary)
+	}
+	if operation.Steps[5].Status != diagnostics.StatusPending {
+		t.Fatalf("attach_agent status = %q, want pending", operation.Steps[5].Status)
 	}
 	if calls.attaches != 0 {
 		t.Fatalf("attach count = %d, want 0", calls.attaches)
+	}
+}
+
+func TestRunStartPreflightConfigurationFailsBeforePersistingSession(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	repo := &git.Repository{
+		Path:          t.TempDir(),
+		CurrentBranch: "main",
+		HeadSHA:       "abc123",
+	}
+
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		repo:               repo,
+		cfg:                config.DefaultConfig(),
+		now:                time.Date(2026, time.March, 12, 20, 30, 0, 0, time.UTC),
+		configPreflightErr: kagerr.WithFailureClass(kagerr.FailureClassImage, "preflight image check workspace_image failed", errors.New("invalid image reference")),
+	})
+
+	err := runStart(context.Background(), "codex", false)
+	if err == nil {
+		t.Fatal("runStart() error = nil, want preflight configuration failure")
+	}
+	if !strings.Contains(err.Error(), "start failed at step preflight_configuration") {
+		t.Fatalf("runStart() error = %v, want preflight step name", err)
+	}
+	if len(calls.operations) != 1 {
+		t.Fatalf("operation count = %d, want 1", len(calls.operations))
+	}
+	if got := calls.operations[0].Steps[1].FailureClass; got != kagerr.FailureClassImage {
+		t.Fatalf("preflight_configuration failure class = %q, want %q", got, kagerr.FailureClassImage)
+	}
+
+	store, err := session.OpenDefault()
+	if err != nil {
+		t.Fatalf("OpenDefault() returned error: %v", err)
+	}
+	defer store.Close()
+
+	summaries, err := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
+	if err != nil {
+		t.Fatalf("List() returned error: %v", err)
+	}
+	if len(summaries) != 0 {
+		t.Fatalf("len(List()) = %d, want 0 sessions after preflight failure", len(summaries))
+	}
+}
+
+func TestRunAttachPreflightRuntimeRecordsFailureClass(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	store, err := session.OpenDefault()
+	if err != nil {
+		t.Fatalf("OpenDefault() returned error: %v", err)
+	}
+
+	persisted, err := store.CreateKagenSession(context.Background(), session.CreateKagenSessionParams{
+		RepoID:          "repo-1",
+		RepoPath:        t.TempDir(),
+		BaseBranch:      "main",
+		WorkspaceBranch: "kagen/main",
+		HeadSHAAtStart:  "abc123",
+		Namespace:       "kagen-repo-1",
+		PodName:         "agent",
+		Status:          sessionStatusReady,
+		CreatedAt:       time.Date(2026, time.March, 12, 10, 0, 0, 0, time.UTC),
+		LastUsedAt:      time.Date(2026, time.March, 12, 10, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("CreateKagenSession() returned error: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() returned error: %v", err)
+	}
+
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		cfg:                 config.DefaultConfig(),
+		now:                 time.Date(2026, time.March, 12, 20, 45, 0, 0, time.UTC),
+		runtimePreflightErr: kagerr.WithFailureClass(kagerr.FailureClassAgentBinary, "runtime binary \"codex\" is not available in the toolbox image", errors.New("command not found")),
+	})
+
+	err = runAttach(context.Background(), "codex", persisted.ID, true)
+	if err == nil {
+		t.Fatal("runAttach() error = nil, want runtime preflight failure")
+	}
+	if !strings.Contains(err.Error(), "attach failed at step preflight_runtime") {
+		t.Fatalf("runAttach() error = %v, want preflight_runtime failure", err)
+	}
+	if len(calls.operations) != 1 {
+		t.Fatalf("operation count = %d, want 1", len(calls.operations))
+	}
+	if got := calls.operations[0].Steps[2].FailureClass; got != kagerr.FailureClassAgentBinary {
+		t.Fatalf("preflight_runtime failure class = %q, want %q", got, kagerr.FailureClassAgentBinary)
+	}
+	if got := calls.operations[0].Steps[2].Metadata["failure_class"]; got != string(kagerr.FailureClassAgentBinary) {
+		t.Fatalf("preflight_runtime metadata failure_class = %q, want %q", got, kagerr.FailureClassAgentBinary)
 	}
 }
 
@@ -578,23 +763,27 @@ func TestRootCommandShowsHelpInsteadOfCompatibilityStart(t *testing.T) {
 }
 
 type sessionFlowStubOptions struct {
-	repo               *git.Repository
-	cfg                *config.Config
-	now                time.Time
-	ensureNamespaceErr error
-	ensureProxyErr     error
-	ensureResourcesErr error
-	validateErr        error
-	launchErr          error
-	prepareErr         error
-	attachErr          error
+	repo                *git.Repository
+	cfg                 *config.Config
+	now                 time.Time
+	ensureNamespaceErr  error
+	ensureProxyErr      error
+	ensureResourcesErr  error
+	configPreflightErr  error
+	runtimePreflightErr error
+	validateErr         error
+	launchErr           error
+	prepareErr          error
+	attachErr           error
+	artefactCollector   diagnostics.FailureArtefactCollector
 }
 
 type sessionFlowCalls struct {
-	launches   int
-	prepares   int
-	attaches   int
-	operations []diagnostics.Operation
+	launches         int
+	prepares         int
+	attaches         int
+	operations       []diagnostics.Operation
+	artefactRequests []diagnostics.FailureArtefactRequest
 }
 
 func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCalls {
@@ -611,11 +800,14 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 	originalEnsureProxy := ensureProxyForSession
 	originalEnsureResources := ensureResourcesForSession
 	originalEnsureForgejoImport := ensureForgejoImportForSession
+	originalConfigPreflight := runConfigurationPreflightForSession
+	originalRuntimePreflight := runRuntimePreflightForSession
 	originalValidateProxyPolicy := validateProxyPolicyForSession
 	originalLaunchAgentRuntime := launchAgentRuntimeForSession
 	originalPrepareAgentState := prepareAgentStateForSession
 	originalAttachAgent := attachAgentForSession
 	originalReporter := newDiagnosticsReporterForSession
+	originalArtefactCollector := newFailureArtefactCollectorForSession
 	originalNow := nowForSession
 
 	t.Cleanup(func() {
@@ -627,11 +819,14 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 		ensureProxyForSession = originalEnsureProxy
 		ensureResourcesForSession = originalEnsureResources
 		ensureForgejoImportForSession = originalEnsureForgejoImport
+		runConfigurationPreflightForSession = originalConfigPreflight
+		runRuntimePreflightForSession = originalRuntimePreflight
 		validateProxyPolicyForSession = originalValidateProxyPolicy
 		launchAgentRuntimeForSession = originalLaunchAgentRuntime
 		prepareAgentStateForSession = originalPrepareAgentState
 		attachAgentForSession = originalAttachAgent
 		newDiagnosticsReporterForSession = originalReporter
+		newFailureArtefactCollectorForSession = originalArtefactCollector
 		nowForSession = originalNow
 	})
 
@@ -667,6 +862,12 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 	ensureForgejoImportForSession = func(_ context.Context, _ *forgejo.ForgejoService, _ *git.Repository) error {
 		return nil
 	}
+	runConfigurationPreflightForSession = func(_ context.Context, _ *git.Repository, _ *config.Config, _ agent.Type) (preflight.Report, error) {
+		return preflight.Report{}, opts.configPreflightErr
+	}
+	runRuntimePreflightForSession = func(_ context.Context, _ *git.Repository, _ string, _ agent.Type) (preflight.Report, error) {
+		return preflight.Report{}, opts.runtimePreflightErr
+	}
 	validateProxyPolicyForSession = func(_ context.Context, _ string, _ *git.Repository, _ *config.Config, _ agent.Type) error {
 		return opts.validateErr
 	}
@@ -683,6 +884,13 @@ func stubSessionFlow(t *testing.T, opts sessionFlowStubOptions) *sessionFlowCall
 		return opts.attachErr
 	}
 	newDiagnosticsReporterForSession = func() diagnostics.Reporter { return reporter }
+	newFailureArtefactCollectorForSession = func() diagnostics.FailureArtefactCollector {
+		if opts.artefactCollector != nil {
+			return opts.artefactCollector
+		}
+
+		return &captureFailureArtefactCollector{calls: calls, directory: "/tmp/kagen-failure-artefacts"}
+	}
 	nowForSession = func() time.Time {
 		if opts.now.IsZero() {
 			return time.Date(2026, time.March, 12, 19, 0, 0, 0, time.UTC)
@@ -702,4 +910,212 @@ func (r *captureDiagnosticsReporter) StepStarted(diagnostics.Operation, diagnost
 
 func (r *captureDiagnosticsReporter) OperationFinished(operation diagnostics.Operation) {
 	r.calls.operations = append(r.calls.operations, operation)
+}
+
+type captureFailureArtefactCollector struct {
+	calls     *sessionFlowCalls
+	directory string
+}
+
+func (c *captureFailureArtefactCollector) Collect(_ context.Context, req diagnostics.FailureArtefactRequest) (diagnostics.FailureArtefactResult, error) {
+	if c.calls != nil {
+		c.calls.artefactRequests = append(c.calls.artefactRequests, req)
+	}
+	return diagnostics.FailureArtefactResult{Directory: c.directory}, nil
+}
+
+func TestRunStartFailureCapturesFailureArtefactsForPersistedSession(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	repo := &git.Repository{
+		Path:          t.TempDir(),
+		CurrentBranch: "main",
+		HeadSHA:       "abc123",
+	}
+
+	collector := &captureFailureArtefactCollector{directory: "/tmp/kagen-start-failure"}
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		repo:               repo,
+		cfg:                config.DefaultConfig(),
+		now:                time.Date(2026, time.March, 12, 20, 0, 0, 0, time.UTC),
+		ensureResourcesErr: errors.New("image pull denied"),
+		artefactCollector:  collector,
+	})
+	collector.calls = calls
+
+	err := runStart(context.Background(), "codex", false)
+	if err == nil {
+		t.Fatal("runStart() error = nil, want ensure_resources failure")
+	}
+	if !strings.Contains(err.Error(), "start failed at step ensure_resources") {
+		t.Fatalf("runStart() error = %v, want failed step", err)
+	}
+	if len(calls.artefactRequests) != 1 {
+		t.Fatalf("artefact request count = %d, want 1", len(calls.artefactRequests))
+	}
+	request := calls.artefactRequests[0]
+	if request.Operation.Name != "start" {
+		t.Fatalf("artefact operation = %q, want start", request.Operation.Name)
+	}
+	if request.SessionSummary == nil {
+		t.Fatal("artefact request session summary is nil")
+	}
+	if request.SessionSummary.Session.Status != sessionStatusFailed {
+		t.Fatalf("artefact session status = %q, want failed", request.SessionSummary.Session.Status)
+	}
+	if request.SessionSummary.Session.ID == 0 {
+		t.Fatal("artefact session ID is empty")
+	}
+}
+
+func TestRunStartDetachFailureCapturesFailureClassAndMarksSessionFailed(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	repo := &git.Repository{
+		Path:          t.TempDir(),
+		CurrentBranch: "main",
+		HeadSHA:       "abc123",
+	}
+
+	collector := &captureFailureArtefactCollector{directory: "/tmp/kagen-start-detach-failure"}
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		repo:              repo,
+		cfg:               config.DefaultConfig(),
+		now:               time.Date(2026, time.March, 12, 20, 15, 0, 0, time.UTC),
+		prepareErr:        kagerr.WithFailureClass(kagerr.FailureClassAgentHome, "preparing agent state path", errors.New("permission denied")),
+		artefactCollector: collector,
+	})
+	collector.calls = calls
+
+	err := runStart(context.Background(), "codex", true)
+	if err == nil {
+		t.Fatal("runStart() error = nil, want prepare_agent_state failure")
+	}
+	if !strings.Contains(err.Error(), "start failed at step prepare_agent_state") {
+		t.Fatalf("runStart() error = %v, want failed step", err)
+	}
+	if calls.attaches != 0 {
+		t.Fatalf("attach count = %d, want 0", calls.attaches)
+	}
+	if len(calls.operations) != 1 {
+		t.Fatalf("operation count = %d, want 1", len(calls.operations))
+	}
+
+	operation := calls.operations[0]
+	if got := operation.Steps[9].FailureClass; got != kagerr.FailureClassAgentHome {
+		t.Fatalf("prepare_agent_state failure class = %q, want %q", got, kagerr.FailureClassAgentHome)
+	}
+	if len(calls.artefactRequests) != 1 {
+		t.Fatalf("artefact request count = %d, want 1", len(calls.artefactRequests))
+	}
+	request := calls.artefactRequests[0]
+	if request.SessionSummary == nil {
+		t.Fatal("artefact request session summary is nil")
+	}
+	if request.SessionSummary.Session.Status != sessionStatusFailed {
+		t.Fatalf("artefact session status = %q, want failed", request.SessionSummary.Session.Status)
+	}
+	if got := request.Operation.Steps[9].FailureClass; got != kagerr.FailureClassAgentHome {
+		t.Fatalf("artefact failure class = %q, want %q", got, kagerr.FailureClassAgentHome)
+	}
+	if request.Operation.Metadata["start_mode"] != "detached" {
+		t.Fatalf("artefact start_mode = %q, want detached", request.Operation.Metadata["start_mode"])
+	}
+
+	store, openErr := session.OpenDefault()
+	if openErr != nil {
+		t.Fatalf("OpenDefault() returned error: %v", openErr)
+	}
+	defer store.Close()
+
+	summaries, listErr := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
+	if listErr != nil {
+		t.Fatalf("List() returned error: %v", listErr)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("len(List()) = %d, want 1", len(summaries))
+	}
+	if summaries[0].Session.Status != sessionStatusFailed {
+		t.Fatalf("persisted session status = %q, want failed", summaries[0].Session.Status)
+	}
+}
+
+func TestRunAttachFailurePrintsFailureArtefactPath(t *testing.T) {
+	storeHome := t.TempDir()
+	t.Setenv("HOME", storeHome)
+
+	store, err := session.OpenDefault()
+	if err != nil {
+		t.Fatalf("OpenDefault() returned error: %v", err)
+	}
+
+	persisted, err := store.CreateKagenSession(context.Background(), session.CreateKagenSessionParams{
+		RepoID:          "repo-1",
+		RepoPath:        t.TempDir(),
+		BaseBranch:      "main",
+		WorkspaceBranch: "kagen/main",
+		HeadSHAAtStart:  "abc123",
+		Namespace:       "kagen-repo-1",
+		PodName:         "agent",
+		Status:          sessionStatusReady,
+		CreatedAt:       time.Date(2026, time.March, 12, 10, 0, 0, 0, time.UTC),
+		LastUsedAt:      time.Date(2026, time.March, 12, 10, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("CreateKagenSession() returned error: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() returned error: %v", err)
+	}
+
+	collector := &captureFailureArtefactCollector{directory: "/tmp/kagen-attach-failure"}
+	calls := stubSessionFlow(t, sessionFlowStubOptions{
+		cfg:               config.DefaultConfig(),
+		now:               time.Date(2026, time.March, 12, 21, 0, 0, 0, time.UTC),
+		prepareErr:        errors.New("permission denied"),
+		artefactCollector: collector,
+	})
+	collector.calls = calls
+
+	stderr, restore := captureStderr(t)
+	defer restore()
+
+	err = runAttach(context.Background(), "codex", persisted.ID, true)
+	if err == nil {
+		t.Fatal("runAttach() error = nil, want prepare_agent_state failure")
+	}
+	output := stderr()
+	if !strings.Contains(output, "/tmp/kagen-attach-failure") {
+		t.Fatalf("stderr = %q, want failure artefact path", output)
+	}
+	if len(calls.artefactRequests) != 1 {
+		t.Fatalf("artefact request count = %d, want 1", len(calls.artefactRequests))
+	}
+}
+
+func captureStderr(t *testing.T) (func() string, func()) {
+	t.Helper()
+
+	original := os.Stderr
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() returned error: %v", err)
+	}
+	os.Stderr = writer
+
+	done := make(chan string, 1)
+	go func() {
+		content, _ := io.ReadAll(reader)
+		done <- string(content)
+	}()
+
+	return func() string {
+			_ = writer.Close()
+			return <-done
+		}, func() {
+			os.Stderr = original
+			_ = reader.Close()
+		}
 }

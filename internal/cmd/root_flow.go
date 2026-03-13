@@ -14,6 +14,7 @@ import (
 	"github.com/pejas/kagen/internal/forgejo"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/kubeexec"
+	"github.com/pejas/kagen/internal/preflight"
 	"github.com/pejas/kagen/internal/provenance"
 	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/runtime"
@@ -182,6 +183,24 @@ func ensureResources(
 	return nil
 }
 
+func runConfigurationPreflight(
+	_ context.Context,
+	_ *git.Repository,
+	cfg *config.Config,
+	agentType agent.Type,
+) (preflight.Report, error) {
+	return preflight.ValidateConfiguration(cfg, agentType)
+}
+
+func runRuntimePreflight(
+	ctx context.Context,
+	repo *git.Repository,
+	kubeCtx string,
+	agentType agent.Type,
+) (preflight.Report, error) {
+	return preflight.NewRuntimeValidator(kubeCtx).Validate(ctx, repo, agentType)
+}
+
 func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Repository, cfg *config.Config, agentType agent.Type) error {
 	policy := proxy.LoadPolicy(cfg, string(agentType))
 	if len(policy.AllowedDestinations) == 0 {
@@ -191,19 +210,19 @@ func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Reposito
 
 	manager, err := cluster.NewKubeManager(kubeCtx)
 	if err != nil {
-		return fmt.Errorf("creating cluster manager for proxy validation: %w", err)
+		return proxyFailure("creating cluster manager for proxy validation", err)
 	}
 	if err := manager.EnsureProxyPolicy(ctx, repo); err != nil {
-		return fmt.Errorf("ensuring proxy policy: %w", err)
+		return proxyFailure("ensuring proxy policy", err)
 	}
 
 	policy.Enforced, err = manager.ProxyReady(ctx, repo)
 	if err != nil {
-		return fmt.Errorf("checking proxy readiness: %w", err)
+		return proxyFailure("checking proxy readiness", err)
 	}
 	ui.Verbose("Proxy readiness for kagen-%s: enforced=%t", repo.ID(), policy.Enforced)
 	if err := policy.Validate(); err != nil {
-		return fmt.Errorf("validating proxy policy: %w", err)
+		return proxyFailure("validating proxy policy", err)
 	}
 
 	return nil
@@ -243,7 +262,11 @@ func prepareAgentState(ctx context.Context, repo *git.Repository, kubeCtx string
 		return err
 	}
 
-	return a.Prepare(ctx)
+	if err := a.Prepare(ctx); err != nil {
+		return agentHomeFailure("preparing agent state path", err)
+	}
+
+	return nil
 }
 
 func attachAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type, agentSession session.AgentSession) error {
@@ -260,7 +283,11 @@ func attachAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agen
 		return err
 	}
 
-	return a.Attach(ctx)
+	if err := a.Attach(ctx); err != nil {
+		return attachFailure("attaching agent session", err)
+	}
+
+	return nil
 }
 
 func buildRuntimePod(repo *git.Repository, _ *config.Config, agentType agent.Type) (*corev1.Pod, error) {
@@ -283,4 +310,16 @@ func buildRuntimePod(repo *git.Repository, _ *config.Config, agentType agent.Typ
 	}
 
 	return pod, nil
+}
+
+func proxyFailure(action string, err error) error {
+	return kagerr.WithFailureClass(kagerr.FailureClassProxy, action, err)
+}
+
+func agentHomeFailure(action string, err error) error {
+	return kagerr.WithFailureClass(kagerr.FailureClassAgentHome, action, err)
+}
+
+func attachFailure(action string, err error) error {
+	return kagerr.WithFailureClass(kagerr.FailureClassAttach, action, err)
 }

@@ -250,7 +250,7 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 func proxyContainer() corev1.Container {
 	return corev1.Container{
 		Name:    "proxy",
-		Image:   proxyImageRef(),
+		Image:   ProxyImageRef(),
 		Command: []string{"/bin/sh", "-lc"},
 		Args:    []string{"exec tinyproxy -d -c " + proxyConfigDir + `/tinyproxy.conf`},
 		Ports: []corev1.ContainerPort{
@@ -276,7 +276,8 @@ func proxyContainer() corev1.Container {
 	}
 }
 
-func proxyImageRef() string {
+// ProxyImageRef returns the pinned proxy image reference used on the runtime path.
+func ProxyImageRef() string {
 	if value := os.Getenv(proxyImageEnvVar); value != "" {
 		return value
 	}

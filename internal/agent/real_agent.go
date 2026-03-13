@@ -38,10 +38,6 @@ func (b *baseAgent) Launch(ctx context.Context) error {
 		return fmt.Errorf("waiting for agent pod readiness: %w", err)
 	}
 
-	if err := b.waitForRuntime(ctx, ns); err != nil {
-		return err
-	}
-
 	return nil
 }
 

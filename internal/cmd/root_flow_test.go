@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/config"
+	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/ui"
 	"github.com/pejas/kagen/internal/workload"
@@ -110,5 +112,35 @@ components:
 	}
 	if got := pod.Spec.Containers[1].Image; got != workload.DefaultImages().Toolbox {
 		t.Fatalf("runtime container image = %q, want generated toolbox %q", got, workload.DefaultImages().Toolbox)
+	}
+}
+
+func TestProxyFailureUsesTypedFailureClass(t *testing.T) {
+	t.Parallel()
+
+	err := proxyFailure("validating proxy policy", errors.New("proxy not ready"))
+
+	if got := kagerr.Classify(err); got != kagerr.FailureClassProxy {
+		t.Fatalf("Classify(err) = %q, want %q", got, kagerr.FailureClassProxy)
+	}
+}
+
+func TestAgentHomeFailureUsesTypedFailureClass(t *testing.T) {
+	t.Parallel()
+
+	err := agentHomeFailure("preparing agent state path", errors.New("permission denied"))
+
+	if got := kagerr.Classify(err); got != kagerr.FailureClassAgentHome {
+		t.Fatalf("Classify(err) = %q, want %q", got, kagerr.FailureClassAgentHome)
+	}
+}
+
+func TestAttachFailureUsesTypedFailureClass(t *testing.T) {
+	t.Parallel()
+
+	err := attachFailure("attaching agent session", errors.New("tty attach failed"))
+
+	if got := kagerr.Classify(err); got != kagerr.FailureClassAttach {
+		t.Fatalf("Classify(err) = %q, want %q", got, kagerr.FailureClassAttach)
 	}
 }

@@ -45,6 +45,9 @@ func TestRuntimeSpecReadyCheckSearchesToolboxPathCandidates(t *testing.T) {
 	if !strings.Contains(check, `test -n "$KAGEN_AGENT_BIN"`) {
 		t.Fatalf("ReadyCheck() missing resolved binary assertion: %q", check)
 	}
+	if !strings.Contains(check, `test -x "$KAGEN_AGENT_BIN"`) {
+		t.Fatalf("ReadyCheck() missing executable assertion: %q", check)
+	}
 }
 
 func TestRuntimeSpecLegacyBootstrapPreservesRuntimeInstallation(t *testing.T) {
@@ -92,5 +95,32 @@ func TestRuntimeSpecAttachShellForStatePathIsolatesRuntimeState(t *testing.T) {
 	}
 	if !strings.Contains(shell, `exec "$KAGEN_AGENT_BIN" --sandbox danger-full-access -a never`) {
 		t.Fatalf("AttachShellForStatePath() missing resolved codex exec: %q", shell)
+	}
+}
+
+func TestRuntimeSpecBinaryPreflightCheckPrintsResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	spec, err := SpecFor(Codex)
+	if err != nil {
+		t.Fatalf("SpecFor(codex) returned error: %v", err)
+	}
+
+	check := spec.BinaryPreflightCheck()
+	if !strings.Contains(check, `printf '%s' "$KAGEN_AGENT_BIN"`) {
+		t.Fatalf("BinaryPreflightCheck() missing resolved path output: %q", check)
+	}
+}
+
+func TestRuntimeSpecStateRootUsesAgentScopedDirectory(t *testing.T) {
+	t.Parallel()
+
+	spec, err := SpecFor(Codex)
+	if err != nil {
+		t.Fatalf("SpecFor(codex) returned error: %v", err)
+	}
+
+	if got := spec.StateRoot(); got != "/home/kagen/.codex" {
+		t.Fatalf("StateRoot() = %q, want /home/kagen/.codex", got)
 	}
 }

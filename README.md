@@ -48,6 +48,12 @@ Start a new session:
 kagen start codex
 ```
 
+Start a new session without interactive attach, for automation or readiness checks:
+
+```bash
+kagen start --detach codex
+```
+
 Attach a new agent session to the most recent ready kagen session for the current repository:
 
 ```bash
@@ -58,6 +64,12 @@ List persisted sessions for the current repository:
 
 ```bash
 kagen list
+```
+
+Summarise diagnostics for the most recent persisted session in the current repository:
+
+```bash
+kagen doctor
 ```
 
 Shut down the whole local Kagen runtime environment:
@@ -78,6 +90,8 @@ Existing repository `devfile.yaml` files are treated as legacy repository artefa
 
 Leaving an agent TUI with `/exit` or `/quit` only detaches from that tool. `kagen config write` only writes optional repo defaults. `kagen down` stops the whole local Colima/K3s runtime environment, while persisted kagen sessions and agent sessions remain in the local store and continue to appear in `kagen list`.
 
+`kagen start --detach` runs the same runtime, import, preflight, proxy-validation, and agent-state preparation path as interactive `kagen start`, but exits before terminal attach. Use it when automation needs a non-interactive readiness contract, then attach later with `kagen attach <agent> --session <id>`.
+
 Enable verbose output:
 
 ```bash
@@ -85,6 +99,8 @@ kagen --verbose
 ```
 
 With `--verbose`, `kagen start` and `kagen attach` emit a runtime step trace that identifies the active phase, its outcome, and its duration. Failure output names the exact failed step in the top-level error.
+
+`kagen doctor` is read-only. It reports the latest persisted operation trace for the selected session, the persisted session status, the current runtime pod and container state when the runtime is already running, proxy enforcement state, and the failure artefact directory when one exists. Use `kagen doctor --session <id>` to inspect an older session directly.
 
 Open the review page for the current branch:
 

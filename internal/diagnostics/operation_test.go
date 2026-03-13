@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	kagerr "github.com/pejas/kagen/internal/errors"
 )
 
 func TestRecorderTracksSuccessfulAndFailedSteps(t *testing.T) {
@@ -34,7 +36,7 @@ func TestRecorderTracksSuccessfulAndFailedSteps(t *testing.T) {
 		t.Fatalf("ensure_runtime returned error: %v", err)
 	}
 
-	expectedErr := errors.New("pod image pull failed")
+	expectedErr := kagerr.WithFailureClass(kagerr.FailureClassImage, "image pull denied", errors.New("pod image pull failed"))
 	err := recorder.RunStep("ensure_resources", func(step *StepContext) error {
 		step.AddMetadata("pod_name", "agent")
 		return expectedErr
@@ -49,6 +51,9 @@ func TestRecorderTracksSuccessfulAndFailedSteps(t *testing.T) {
 	}
 	if stepErr.Step != "ensure_resources" {
 		t.Fatalf("step name = %q, want ensure_resources", stepErr.Step)
+	}
+	if stepErr.FailureClass != kagerr.FailureClassImage {
+		t.Fatalf("failure class = %q, want %q", stepErr.FailureClass, kagerr.FailureClassImage)
 	}
 
 	operation := recorder.Complete()
@@ -69,6 +74,12 @@ func TestRecorderTracksSuccessfulAndFailedSteps(t *testing.T) {
 	}
 	if operation.Steps[1].ErrorSummary != expectedErr.Error() {
 		t.Fatalf("error summary = %q, want %q", operation.Steps[1].ErrorSummary, expectedErr.Error())
+	}
+	if operation.Steps[1].FailureClass != kagerr.FailureClassImage {
+		t.Fatalf("failure class = %q, want %q", operation.Steps[1].FailureClass, kagerr.FailureClassImage)
+	}
+	if operation.Steps[1].Metadata["failure_class"] != string(kagerr.FailureClassImage) {
+		t.Fatalf("failure metadata = %q, want %q", operation.Steps[1].Metadata["failure_class"], kagerr.FailureClassImage)
 	}
 	if operation.Steps[2].Status != StatusPending {
 		t.Fatalf("attach_agent status = %q, want pending", operation.Steps[2].Status)

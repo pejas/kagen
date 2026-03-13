@@ -54,6 +54,7 @@ func init() {
 	// Register subcommands.
 	rootCmd.AddCommand(newStartCommand())
 	rootCmd.AddCommand(newAttachCommand())
+	rootCmd.AddCommand(newDoctorCommand())
 	rootCmd.AddCommand(newDownCommand())
 	rootCmd.AddCommand(newConfigCommand())
 	rootCmd.AddCommand(newListCommand())

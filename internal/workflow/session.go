@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/pejas/kagen/internal/agent"
+	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/config"
 	"github.com/pejas/kagen/internal/diagnostics"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/preflight"
 	"github.com/pejas/kagen/internal/session"
 	"github.com/pejas/kagen/internal/ui"
 	"github.com/pejas/kagen/internal/workload"
@@ -28,8 +31,10 @@ const (
 	stepEnsureNamespace    = "ensure_namespace"
 	stepEnsureProxy        = "ensure_proxy"
 	stepEnsureResources    = "ensure_resources"
+	stepPreflightConfig    = "preflight_configuration"
 	stepForgejoImport      = "forgejo_import"
 	stepLaunchAgentRuntime = "launch_agent_runtime"
+	stepPreflightRuntime   = "preflight_runtime"
 	stepValidateProxy      = "validate_proxy_policy"
 	stepPrepareAgentState  = "prepare_agent_state"
 	stepAttachAgent        = "attach_agent"
@@ -59,23 +64,30 @@ type ReviewSession interface {
 }
 
 type SessionDependencies struct {
-	LoadConfig            func() (*config.Config, error)
-	DiscoverRepository    func() (*git.Repository, error)
-	EnsureRuntime         func(context.Context, *config.Config) (string, error)
-	ResolveRequestedAgent func(string, *git.Repository, string, *config.Config, bool) (agent.Type, error)
-	ShowSelectedAgent     func(*config.Config, agent.Type)
-	NewForgejoService     func(string) (ImportService, error)
-	EnsureNamespace       func(context.Context, string, *git.Repository, agent.Type) error
-	EnsureProxy           func(context.Context, string, *git.Repository, *config.Config, agent.Type) error
-	EnsureResources       func(context.Context, string, *git.Repository, *config.Config, agent.Type) error
-	EnsureForgejoImport   func(context.Context, ImportService, *git.Repository) error
-	ValidateProxyPolicy   func(context.Context, string, *git.Repository, *config.Config, agent.Type) error
-	LaunchAgentRuntime    func(context.Context, *git.Repository, string, agent.Type) error
-	PrepareAgentState     func(context.Context, *git.Repository, string, agent.Type, session.AgentSession) error
-	AttachAgent           func(context.Context, *git.Repository, string, agent.Type, session.AgentSession) error
-	OpenSessionStore      func() (SessionStore, error)
-	DiagnosticsReporter   diagnostics.Reporter
-	Now                   func() time.Time
+	LoadConfig                func() (*config.Config, error)
+	DiscoverRepository        func() (*git.Repository, error)
+	EnsureRuntime             func(context.Context, *config.Config) (string, error)
+	ResolveRequestedAgent     func(string, *git.Repository, string, *config.Config, bool) (agent.Type, error)
+	ShowSelectedAgent         func(*config.Config, agent.Type)
+	NewForgejoService         func(string) (ImportService, error)
+	EnsureNamespace           func(context.Context, string, *git.Repository, agent.Type) error
+	EnsureProxy               func(context.Context, string, *git.Repository, *config.Config, agent.Type) error
+	EnsureResources           func(context.Context, string, *git.Repository, *config.Config, agent.Type) error
+	EnsureForgejoImport       func(context.Context, ImportService, *git.Repository) error
+	RunConfigurationPreflight func(context.Context, *git.Repository, *config.Config, agent.Type) (preflight.Report, error)
+	RunRuntimePreflight       func(context.Context, *git.Repository, string, agent.Type) (preflight.Report, error)
+	ValidateProxyPolicy       func(context.Context, string, *git.Repository, *config.Config, agent.Type) error
+	LaunchAgentRuntime        func(context.Context, *git.Repository, string, agent.Type) error
+	PrepareAgentState         func(context.Context, *git.Repository, string, agent.Type, session.AgentSession) error
+	AttachAgent               func(context.Context, *git.Repository, string, agent.Type, session.AgentSession) error
+	OpenSessionStore          func() (SessionStore, error)
+	DiagnosticsReporter       diagnostics.Reporter
+	FailureArtefacts          diagnostics.FailureArtefactCollector
+	Now                       func() time.Time
+}
+
+type StartOptions struct {
+	Detach bool
 }
 
 type StartWorkflow struct {
@@ -86,9 +98,9 @@ func NewStartWorkflow(deps SessionDependencies) *StartWorkflow {
 	return &StartWorkflow{deps: deps}
 }
 
-func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
+func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string, options StartOptions) error {
 	ctx = contextOrBackground(ctx)
-	trace := diagnostics.NewRecorder("start", startTraceSteps(), w.deps.Now, w.deps.DiagnosticsReporter)
+	trace := diagnostics.NewRecorder("start", startTraceSteps(options), w.deps.Now, w.deps.DiagnosticsReporter)
 	defer trace.Complete()
 
 	cfg, err := w.deps.LoadConfig()
@@ -107,6 +119,9 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
 		"repo_path":   repo.Path,
 		"base_branch": repo.CurrentBranch,
 	})
+	if options.Detach {
+		trace.AddMetadata("start_mode", "detached")
+	}
 
 	var kubeCtx string
 	if err := trace.RunStep(stepEnsureRuntime, func(step *diagnostics.StepContext) error {
@@ -126,42 +141,31 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
 	if err != nil {
 		return err
 	}
-	trace.AddMetadata("agent_type", string(agentType))
 	images := workload.DefaultImages()
 	trace.AddMetadataMap(map[string]string{
+		"agent_type":      string(agentType),
+		"agent_container": agentContainerName(agentType),
 		"workspace_image": images.Workspace,
 		"toolbox_image":   images.Toolbox,
+		"proxy_image":     cluster.ProxyImageRef(),
 	})
 	w.deps.ShowSelectedAgent(cfg, agentType)
 
-	forgejoService, err := w.deps.NewForgejoService(kubeCtx)
-	if err != nil {
-		return err
+	handleEarlyFailure := func(err error) error {
+		return w.captureFailure(ctx, trace, err, failureCapture{})
 	}
-	if err := trace.RunStep(stepEnsureNamespace, func(step *diagnostics.StepContext) error {
-		return w.deps.EnsureNamespace(ctx, kubeCtx, repo, agentType)
+	if err := trace.RunStep(stepPreflightConfig, func(step *diagnostics.StepContext) error {
+		if w.deps.RunConfigurationPreflight == nil {
+			return nil
+		}
+
+		report, preflightErr := w.deps.RunConfigurationPreflight(ctx, repo, cfg, agentType)
+		addPreflightMetadata(step, report)
+		return preflightErr
 	}); err != nil {
-		return err
+		return handleEarlyFailure(err)
 	}
-	if err := trace.RunStep(stepEnsureProxy, func(step *diagnostics.StepContext) error {
-		return w.deps.EnsureProxy(ctx, kubeCtx, repo, cfg, agentType)
-	}); err != nil {
-		return err
-	}
-	if err := trace.RunStep(stepEnsureResources, func(step *diagnostics.StepContext) error {
-		step.AddMetadataMap(map[string]string{
-			"workspace_image": images.Workspace,
-			"toolbox_image":   images.Toolbox,
-		})
-		return w.deps.EnsureResources(ctx, kubeCtx, repo, cfg, agentType)
-	}); err != nil {
-		return err
-	}
-	if err := trace.RunStep(stepForgejoImport, func(step *diagnostics.StepContext) error {
-		return w.deps.EnsureForgejoImport(ctx, forgejoService, repo)
-	}); err != nil {
-		return err
-	}
+
 	store, err := w.deps.OpenSessionStore()
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
@@ -176,16 +180,63 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
 	trace.AddMetadata("session_uid", persisted.UID)
 	ui.Verbose("Created kagen session id=%d uid=%s", persisted.ID, persisted.UID)
 
+	handleFailure := func(err error) error {
+		return w.captureFailure(ctx, trace, err, failureCapture{
+			store:     store,
+			sessionID: persisted.ID,
+		})
+	}
+
+	forgejoService, err := w.deps.NewForgejoService(kubeCtx)
+	if err != nil {
+		return handleFailure(err)
+	}
+	if err := trace.RunStep(stepEnsureNamespace, func(step *diagnostics.StepContext) error {
+		return w.deps.EnsureNamespace(ctx, kubeCtx, repo, agentType)
+	}); err != nil {
+		return handleFailure(err)
+	}
+	if err := trace.RunStep(stepEnsureProxy, func(step *diagnostics.StepContext) error {
+		return w.deps.EnsureProxy(ctx, kubeCtx, repo, cfg, agentType)
+	}); err != nil {
+		return handleFailure(err)
+	}
+	if err := trace.RunStep(stepEnsureResources, func(step *diagnostics.StepContext) error {
+		step.AddMetadataMap(map[string]string{
+			"workspace_image": images.Workspace,
+			"toolbox_image":   images.Toolbox,
+		})
+		return w.deps.EnsureResources(ctx, kubeCtx, repo, cfg, agentType)
+	}); err != nil {
+		return handleFailure(err)
+	}
+	if err := trace.RunStep(stepForgejoImport, func(step *diagnostics.StepContext) error {
+		return w.deps.EnsureForgejoImport(ctx, forgejoService, repo)
+	}); err != nil {
+		return handleFailure(err)
+	}
+
 	sessionReady := false
 	if err := trace.RunStep(stepLaunchAgentRuntime, func(step *diagnostics.StepContext) error {
 		return w.deps.LaunchAgentRuntime(ctx, repo, kubeCtx, agentType)
 	}); err != nil {
-		return failStartSession(ctx, store, persisted.ID, err)
+		return handleFailure(err)
+	}
+	if err := trace.RunStep(stepPreflightRuntime, func(step *diagnostics.StepContext) error {
+		if w.deps.RunRuntimePreflight == nil {
+			return nil
+		}
+
+		report, preflightErr := w.deps.RunRuntimePreflight(ctx, repo, kubeCtx, agentType)
+		addPreflightMetadata(step, report)
+		return preflightErr
+	}); err != nil {
+		return handleFailure(err)
 	}
 	if err := trace.RunStep(stepValidateProxy, func(step *diagnostics.StepContext) error {
 		return w.deps.ValidateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType)
 	}); err != nil {
-		return failStartSession(ctx, store, persisted.ID, err)
+		return handleFailure(err)
 	}
 
 	var attachedAt time.Time
@@ -218,15 +269,31 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
 		return nil
 	}); err != nil {
 		if !sessionReady {
-			return failStartSession(ctx, store, persisted.ID, err)
+			return handleFailure(err)
 		}
-		return err
+		return w.captureFailure(ctx, trace, err, failureCapture{
+			store:     store,
+			sessionID: persisted.ID,
+		})
+	}
+
+	if options.Detach {
+		ui.Success(
+			"Session %d is ready. Attach later with 'kagen attach %s --session %d'.",
+			persisted.ID,
+			agentType,
+			persisted.ID,
+		)
+		return nil
 	}
 
 	if err := trace.RunStep(stepAttachAgent, func(step *diagnostics.StepContext) error {
 		return w.deps.AttachAgent(ctx, repo, kubeCtx, agentType, agentSession)
 	}); err != nil {
-		return err
+		return w.captureFailure(ctx, trace, err, failureCapture{
+			store:     store,
+			sessionID: persisted.ID,
+		})
 	}
 
 	return nil
@@ -269,20 +336,33 @@ func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionI
 		return err
 	}
 	trace.AddMetadataMap(map[string]string{
-		"agent_type":  string(agentType),
-		"namespace":   summary.Session.Namespace,
-		"pod_name":    summary.Session.PodName,
-		"repo_id":     summary.Session.RepoID,
-		"repo_path":   summary.Session.RepoPath,
-		"session_id":  strconv.FormatInt(summary.Session.ID, 10),
-		"session_uid": summary.Session.UID,
+		"agent_type":      string(agentType),
+		"agent_container": agentContainerName(agentType),
+		"namespace":       summary.Session.Namespace,
+		"pod_name":        summary.Session.PodName,
+		"repo_id":         summary.Session.RepoID,
+		"repo_path":       summary.Session.RepoPath,
+		"session_id":      strconv.FormatInt(summary.Session.ID, 10),
+		"session_uid":     summary.Session.UID,
+		"workspace_image": workload.DefaultImages().Workspace,
+		"toolbox_image":   workload.DefaultImages().Toolbox,
+		"proxy_image":     cluster.ProxyImageRef(),
 	})
 	ui.Verbose("Resolved attach target session id=%d uid=%s", summary.Session.ID, summary.Session.UID)
+
+	var kubeCtx string
+
+	handleFailure := func(err error) error {
+		return w.captureFailure(ctx, trace, err, failureCapture{
+			store:          store,
+			sessionID:      summary.Session.ID,
+			sessionSummary: &summary,
+		})
+	}
 
 	repo := repositoryFromSession(summary.Session)
 	w.deps.ShowSelectedAgent(cfg, agentType)
 
-	var kubeCtx string
 	if err := trace.RunStep(stepEnsureRuntime, func(step *diagnostics.StepContext) error {
 		resolvedKubeCtx, ensureErr := w.deps.EnsureRuntime(ctx, cfg)
 		if ensureErr != nil {
@@ -293,17 +373,28 @@ func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionI
 		trace.AddMetadata("kube_context", kubeCtx)
 		return nil
 	}); err != nil {
-		return err
+		return handleFailure(err)
 	}
 	if err := trace.RunStep(stepLaunchAgentRuntime, func(step *diagnostics.StepContext) error {
 		return w.deps.LaunchAgentRuntime(ctx, repo, kubeCtx, agentType)
 	}); err != nil {
-		return err
+		return handleFailure(err)
+	}
+	if err := trace.RunStep(stepPreflightRuntime, func(step *diagnostics.StepContext) error {
+		if w.deps.RunRuntimePreflight == nil {
+			return nil
+		}
+
+		report, preflightErr := w.deps.RunRuntimePreflight(ctx, repo, kubeCtx, agentType)
+		addPreflightMetadata(step, report)
+		return preflightErr
+	}); err != nil {
+		return handleFailure(err)
 	}
 	if err := trace.RunStep(stepValidateProxy, func(step *diagnostics.StepContext) error {
 		return w.deps.ValidateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType)
 	}); err != nil {
-		return err
+		return handleFailure(err)
 	}
 
 	var attachedAt time.Time
@@ -331,13 +422,13 @@ func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionI
 
 		return nil
 	}); err != nil {
-		return err
+		return handleFailure(err)
 	}
 
 	if err := trace.RunStep(stepAttachAgent, func(step *diagnostics.StepContext) error {
 		return w.deps.AttachAgent(ctx, repo, kubeCtx, agentType, agentSession)
 	}); err != nil {
-		return err
+		return handleFailure(err)
 	}
 
 	return nil
@@ -480,26 +571,117 @@ func failStartSession(ctx context.Context, store SessionStore, sessionID int64, 
 	return err
 }
 
-func startTraceSteps() []string {
-	return []string{
+type failureCapture struct {
+	store          SessionStore
+	sessionID      int64
+	sessionSummary *session.Summary
+}
+
+func (w *StartWorkflow) captureFailure(
+	ctx context.Context,
+	trace *diagnostics.Recorder,
+	err error,
+	state failureCapture,
+) error {
+	return captureWorkflowFailure(ctx, w.deps, trace, err, state, true)
+}
+
+func (w *AttachWorkflow) captureFailure(
+	ctx context.Context,
+	trace *diagnostics.Recorder,
+	err error,
+	state failureCapture,
+) error {
+	return captureWorkflowFailure(ctx, w.deps, trace, err, state, false)
+}
+
+func captureWorkflowFailure(
+	ctx context.Context,
+	deps SessionDependencies,
+	trace *diagnostics.Recorder,
+	err error,
+	state failureCapture,
+	updateSessionStatus bool,
+) error {
+	if updateSessionStatus && state.sessionID > 0 && state.store != nil {
+		err = failStartSession(ctx, state.store, state.sessionID, err)
+	}
+
+	if deps.FailureArtefacts == nil {
+		return err
+	}
+
+	operation := trace.Complete()
+	summary := state.sessionSummary
+	if summary == nil && state.store != nil && state.sessionID > 0 {
+		loadedSummary, found, loadErr := state.store.GetSummary(ctx, state.sessionID)
+		if loadErr != nil {
+			ui.Warn("Failed to load session summary for failure artefacts: %v", loadErr)
+		} else if found {
+			summary = &loadedSummary
+		}
+	}
+
+	result, captureErr := deps.FailureArtefacts.Collect(context.Background(), diagnostics.FailureArtefactRequest{
+		Operation:      operation,
+		Err:            err,
+		KubeContext:    strings.TrimSpace(operation.Metadata["kube_context"]),
+		SessionSummary: summary,
+	})
+	if captureErr != nil {
+		ui.Warn("Failed to capture failure artefacts: %v", captureErr)
+		return err
+	}
+
+	ui.Warn("Failure artefacts saved to %s", result.Directory)
+	return err
+}
+
+func agentContainerName(agentType agent.Type) string {
+	spec, err := agent.SpecFor(agentType)
+	if err != nil {
+		return ""
+	}
+
+	return spec.ContainerName()
+}
+
+func startTraceSteps(options StartOptions) []string {
+	steps := []string{
 		stepEnsureRuntime,
+		stepPreflightConfig,
 		stepEnsureNamespace,
 		stepEnsureProxy,
 		stepEnsureResources,
 		stepForgejoImport,
 		stepLaunchAgentRuntime,
+		stepPreflightRuntime,
 		stepValidateProxy,
 		stepPrepareAgentState,
-		stepAttachAgent,
 	}
+
+	if !options.Detach {
+		steps = append(steps, stepAttachAgent)
+	}
+
+	return steps
 }
 
 func attachTraceSteps() []string {
 	return []string{
 		stepEnsureRuntime,
 		stepLaunchAgentRuntime,
+		stepPreflightRuntime,
 		stepValidateProxy,
 		stepPrepareAgentState,
 		stepAttachAgent,
 	}
+}
+
+func addPreflightMetadata(step *diagnostics.StepContext, report preflight.Report) {
+	if step == nil {
+		return
+	}
+
+	step.AddMetadataMap(report.Metadata())
 }
