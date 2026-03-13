@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -25,10 +26,11 @@ const (
 	proxyServiceName    = "egress-proxy"
 	proxyPolicyName     = "egress-proxy-egress"
 	proxyConfigMapName  = "egress-proxy-config"
-	proxyImage          = "alpine@sha256:55ae5d250caebc548793f321534bc6a8ef1d116f334f18f4ada1b2daad3251b2"
+	defaultProxyImage   = "ghcr.io/pejas/kagen-proxy:2026-03-12"
 	proxyPort           = 8888
 	proxyConfigDir      = "/etc/kagen-proxy"
 	proxyConfigChecksum = "kagen.io/proxy-config-sha256"
+	proxyImageEnvVar    = "KAGEN_PROXY_IMAGE"
 )
 
 // EnsureProxy reconciles the repo-scoped proxy workload, service, and egress policy.
@@ -50,14 +52,19 @@ func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, pol
 	if err := k.ensureProxyDeployment(ctx, nsName, repo.ID(), checksum); err != nil {
 		return err
 	}
-	if err := k.ensureAgentNetworkPolicy(ctx, nsName, repo.ID()); err != nil {
-		return err
-	}
 	if err := k.waitForProxyReady(ctx, nsName); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// EnsureProxyPolicy reconciles the repo-scoped agent egress policy once the
+// workspace bootstrap path is complete and proxy enforcement should become
+// active for the agent pod.
+func (k *KubeManager) EnsureProxyPolicy(ctx context.Context, repo *git.Repository) error {
+	nsName := fmt.Sprintf("kagen-%s", repo.ID())
+	return k.ensureAgentNetworkPolicy(ctx, nsName, repo.ID())
 }
 
 func (k *KubeManager) deleteProxyResources(ctx context.Context, namespace string) error {
@@ -243,11 +250,9 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 func proxyContainer() corev1.Container {
 	return corev1.Container{
 		Name:    "proxy",
-		Image:   proxyImage,
+		Image:   proxyImageRef(),
 		Command: []string{"/bin/sh", "-lc"},
-		Args: []string{`set -eu
-apk add --no-cache tinyproxy >/dev/null
-exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`},
+		Args:    []string{"exec tinyproxy -d -c " + proxyConfigDir + `/tinyproxy.conf`},
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "http",
@@ -269,6 +274,14 @@ exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`},
 			},
 		},
 	}
+}
+
+func proxyImageRef() string {
+	if value := os.Getenv(proxyImageEnvVar); value != "" {
+		return value
+	}
+
+	return defaultProxyImage
 }
 
 func (k *KubeManager) ensureProxyService(ctx context.Context, namespace, repoID string) error {

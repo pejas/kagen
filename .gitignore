@@ -24,3 +24,7 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local runtime-image tooling state
+.mise-cache/
+.mise-state/

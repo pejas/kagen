@@ -9,9 +9,7 @@ type hostCatalogue struct {
 }
 
 var requiredHosts = hostCatalogue{
-	CommonBootstrap: []string{
-		"registry.npmjs.org",
-	},
+	CommonBootstrap: []string{},
 	AgentRequired: map[string][]string{
 		"claude": {
 			"api.anthropic.com",

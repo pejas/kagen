@@ -103,10 +103,6 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
 	if err := w.deps.EnsureForgejoImport(ctx, forgejoService, repo); err != nil {
 		return err
 	}
-	if err := w.deps.ValidateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType); err != nil {
-		return err
-	}
-
 	store, err := w.deps.OpenSessionStore()
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
@@ -122,6 +118,13 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string) error {
 	if err := w.deps.LaunchAgentRuntime(ctx, repo, kubeCtx, agentType); err != nil {
 		if updateErr := store.UpdateKagenSessionStatus(ctx, persisted.ID, SessionStatusFailed); updateErr != nil {
 			return fmt.Errorf("launching agent: %w (failed to mark session %d failed: %v)", err, persisted.ID, updateErr)
+		}
+
+		return err
+	}
+	if err := w.deps.ValidateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType); err != nil {
+		if updateErr := store.UpdateKagenSessionStatus(ctx, persisted.ID, SessionStatusFailed); updateErr != nil {
+			return fmt.Errorf("validating proxy policy: %w (failed to mark session %d failed: %v)", err, persisted.ID, updateErr)
 		}
 
 		return err
@@ -187,10 +190,10 @@ func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionI
 	if err != nil {
 		return err
 	}
-	if err := w.deps.ValidateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType); err != nil {
+	if err := w.deps.LaunchAgentRuntime(ctx, repo, kubeCtx, agentType); err != nil {
 		return err
 	}
-	if err := w.deps.LaunchAgentRuntime(ctx, repo, kubeCtx, agentType); err != nil {
+	if err := w.deps.ValidateProxyPolicy(ctx, kubeCtx, repo, cfg, agentType); err != nil {
 		return err
 	}
 

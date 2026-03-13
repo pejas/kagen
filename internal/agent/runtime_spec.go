@@ -10,6 +10,7 @@ import (
 
 const defaultHomeDir = "/home/kagen"
 const defaultTerm = "xterm-256color"
+const defaultToolboxPath = "/opt/mise/shims:/opt/mise/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 type runtimeBootstrap struct {
 	command []string
@@ -47,9 +48,10 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			DisplayName:   "Claude",
 			GitAuthorName: "claude",
 			Binary:        "claude",
-			AttachShell:   "cd /projects/workspace && exec claude",
+			AttachShell:   `cd /projects/workspace && exec "$KAGEN_AGENT_BIN"`,
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
+				{Name: "PATH", Value: defaultToolboxPath},
 				{Name: "TERM", Value: defaultTerm},
 				{Name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1"},
 			},
@@ -61,9 +63,10 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			DisplayName:   "Codex",
 			GitAuthorName: "oai-codex",
 			Binary:        "codex",
-			AttachShell:   "cd /projects/workspace && exec codex --sandbox danger-full-access -a never",
+			AttachShell:   `cd /projects/workspace && exec "$KAGEN_AGENT_BIN" --sandbox danger-full-access -a never`,
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
+				{Name: "PATH", Value: defaultToolboxPath},
 				{Name: "TERM", Value: defaultTerm},
 				{Name: "CODEX_HOME", Value: defaultHomeDir + "/.codex"},
 			},
@@ -75,9 +78,10 @@ func SpecFor(agentType Type) (RuntimeSpec, error) {
 			DisplayName:   "OpenCode",
 			GitAuthorName: "opencode",
 			Binary:        "opencode",
-			AttachShell:   "cd /projects/workspace && exec opencode",
+			AttachShell:   `cd /projects/workspace && exec "$KAGEN_AGENT_BIN"`,
 			RequiredEnv: []EnvVar{
 				{Name: "HOME", Value: defaultHomeDir},
+				{Name: "PATH", Value: defaultToolboxPath},
 				{Name: "TERM", Value: defaultTerm},
 			},
 			legacyBootstrap: npmBootstrap("opencode", "opencode-ai"),
@@ -109,7 +113,11 @@ func (s RuntimeSpec) ToolboxBootstrapArgs() []string {
 }
 
 func (s RuntimeSpec) ReadyCheck() string {
-	return fmt.Sprintf("test -d /projects/workspace/.git && command -v %s >/dev/null 2>&1", s.Binary)
+	return strings.Join([]string{
+		`test -d /projects/workspace/.git`,
+		s.resolveBinaryShell("KAGEN_AGENT_BIN"),
+		`test -n "$KAGEN_AGENT_BIN"`,
+	}, " && ")
 }
 
 func (s RuntimeSpec) RequiredEnvMap() map[string]string {
@@ -124,17 +132,19 @@ func (s RuntimeSpec) RequiredEnvMap() map[string]string {
 // under the provided per-agent-session path where supported.
 func (s RuntimeSpec) AttachShellForStatePath(statePath string) string {
 	trimmedStatePath := strings.TrimSpace(statePath)
-	if trimmedStatePath == "" {
-		return s.AttachShell
-	}
-
 	env := s.RequiredEnvMap()
-	env["HOME"] = trimmedStatePath
-	if s.Type == Codex {
-		env["CODEX_HOME"] = trimmedStatePath
+	exports := []string{}
+	if trimmedStatePath == "" {
+		if homePath, ok := env["HOME"]; ok {
+			exports = append(exports, fmt.Sprintf("mkdir -p %q", homePath))
+		}
+	} else {
+		env["HOME"] = trimmedStatePath
+		if s.Type == Codex {
+			env["CODEX_HOME"] = trimmedStatePath
+		}
+		exports = append(exports, fmt.Sprintf("mkdir -p %q", trimmedStatePath))
 	}
-
-	exports := []string{fmt.Sprintf("mkdir -p %q", trimmedStatePath)}
 	for _, variable := range s.RequiredEnv {
 		value, ok := env[variable.Name]
 		if !ok {
@@ -156,7 +166,7 @@ func (s RuntimeSpec) AttachShellForStatePath(statePath string) string {
 		exports = append(exports, fmt.Sprintf("export %s=%q", name, value))
 	}
 
-	return strings.Join(append(exports, s.AttachShell), " && ")
+	return strings.Join(append(exports, s.resolveBinaryShell("KAGEN_AGENT_BIN"), s.AttachShell), " && ")
 }
 
 // SupportedTypes returns the supported runtime identifiers.
@@ -209,4 +219,30 @@ exec tail -f /dev/null`, npmPackage, binary, binary)},
 
 func cloneStrings(values []string) []string {
 	return append([]string(nil), values...)
+}
+
+func (s RuntimeSpec) resolveBinaryShell(variableName string) string {
+	lines := []string{
+		fmt.Sprintf(`export %s=""`, variableName),
+		fmt.Sprintf(`if resolved=$(command -v %s 2>/dev/null); then export %s="$resolved"; fi`, shellQuote(s.Binary), variableName),
+	}
+	for _, candidate := range s.binaryCandidates() {
+		lines = append(lines, fmt.Sprintf(`if [ -z "$%s" ] && [ -x %q ]; then export %s=%q; fi`, variableName, candidate, variableName, candidate))
+	}
+
+	return strings.Join(lines, "; ")
+}
+
+func (s RuntimeSpec) binaryCandidates() []string {
+	return []string{
+		"/opt/mise/shims/" + s.Binary,
+		"/opt/mise/bin/" + s.Binary,
+		"/usr/local/bin/" + s.Binary,
+		"/usr/bin/" + s.Binary,
+		"/bin/" + s.Binary,
+	}
+}
+
+func shellQuote(value string) string {
+	return fmt.Sprintf("%q", value)
 }

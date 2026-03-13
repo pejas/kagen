@@ -19,14 +19,13 @@ func TestLoadPolicyFromConfig(t *testing.T) {
 	}
 
 	policy := LoadPolicy(cfg, "opencode")
-	if len(policy.AllowedDestinations) != 4 {
-		t.Errorf("expected 4 allowed destinations, got %d", len(policy.AllowedDestinations))
+	if len(policy.AllowedDestinations) != 3 {
+		t.Errorf("expected 3 allowed destinations, got %d", len(policy.AllowedDestinations))
 	}
 	want := map[string]bool{
-		"api.anthropic.com":  true,
-		"github.com":         true,
-		"opencode.ai":        true,
-		"registry.npmjs.org": true,
+		"api.anthropic.com": true,
+		"github.com":        true,
+		"opencode.ai":       true,
 	}
 	for _, host := range policy.AllowedDestinations {
 		delete(want, host)
@@ -92,8 +91,8 @@ func TestLoadPolicyCodexIncludesRequiredHosts(t *testing.T) {
 	if !policy.AllowsDestination("api.openai.com") {
 		t.Error("LoadPolicy(codex) should allow api.openai.com")
 	}
-	if !policy.AllowsDestination("registry.npmjs.org") {
-		t.Error("LoadPolicy(codex) should allow registry.npmjs.org")
+	if policy.AllowsDestination("registry.npmjs.org") {
+		t.Error("LoadPolicy(codex) should not allow registry.npmjs.org once the toolbox image is prebuilt")
 	}
 }
 
@@ -104,7 +103,7 @@ func TestLoadPolicyOpenCodeIncludesRequiredHosts(t *testing.T) {
 	if !policy.AllowsDestination("opencode.ai") {
 		t.Error("LoadPolicy(opencode) should allow opencode.ai")
 	}
-	if !policy.AllowsDestination("registry.npmjs.org") {
-		t.Error("LoadPolicy(opencode) should allow registry.npmjs.org")
+	if policy.AllowsDestination("registry.npmjs.org") {
+		t.Error("LoadPolicy(opencode) should not allow registry.npmjs.org once the toolbox image is prebuilt")
 	}
 }

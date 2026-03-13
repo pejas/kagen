@@ -3,6 +3,7 @@ package workload
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/pejas/kagen/internal/agent"
 	corev1 "k8s.io/api/core/v1"
@@ -10,11 +11,13 @@ import (
 )
 
 const (
-	defaultWorkspaceImage = "vxcontrol/codebase@sha256:2ee2867ec75078d66cbdc745ca5c32f0fa619b947de739aab905a2e7367f7632"
-	defaultToolboxImage   = "vxcontrol/codebase@sha256:2ee2867ec75078d66cbdc745ca5c32f0fa619b947de739aab905a2e7367f7632"
+	defaultWorkspaceImage = "ghcr.io/pejas/kagen-workspace:2026-03-12"
+	defaultToolboxImage   = "ghcr.io/pejas/kagen-toolbox:2026-03-12"
 	defaultWorkspaceName  = "workspace"
 	defaultAgentHomeName  = "agent-home"
 	defaultWorkspaceMount = "/projects"
+	workspaceImageEnvVar  = "KAGEN_WORKSPACE_IMAGE"
+	toolboxImageEnvVar    = "KAGEN_TOOLBOX_IMAGE"
 )
 
 // Images describes the pinned baseline images for the generated pod.
@@ -79,8 +82,8 @@ func (b *Builder) BuildPod(req Request) (*corev1.Pod, error) {
 // DefaultImages returns the baseline images used by the workload builder.
 func DefaultImages() Images {
 	return Images{
-		Workspace: defaultWorkspaceImage,
-		Toolbox:   defaultToolboxImage,
+		Workspace: imageRefOrDefault(workspaceImageEnvVar, defaultWorkspaceImage),
+		Toolbox:   imageRefOrDefault(toolboxImageEnvVar, defaultToolboxImage),
 	}
 }
 
@@ -103,8 +106,8 @@ func runtimeContainer(spec agent.RuntimeSpec, images Images) corev1.Container {
 	return corev1.Container{
 		Name:       spec.ContainerName(),
 		Image:      images.Toolbox,
-		Command:    spec.LegacyBootstrapCommand(),
-		Args:       spec.LegacyBootstrapArgs(),
+		Command:    spec.ToolboxBootstrapCommand(),
+		Args:       spec.ToolboxBootstrapArgs(),
 		Env:        requiredEnv(spec.RequiredEnv),
 		WorkingDir: defaultWorkspaceMount + "/workspace",
 		VolumeMounts: []corev1.VolumeMount{
@@ -163,4 +166,12 @@ func requiredEnv(input []agent.EnvVar) []corev1.EnvVar {
 	}
 
 	return env
+}
+
+func imageRefOrDefault(envVar, fallback string) string {
+	if value := os.Getenv(envVar); value != "" {
+		return value
+	}
+
+	return fallback
 }

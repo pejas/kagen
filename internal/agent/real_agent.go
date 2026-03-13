@@ -67,17 +67,7 @@ func (b *baseAgent) Attach(ctx context.Context) error {
 }
 
 func (b *baseAgent) commandArgs() []string {
-	command := agentBinaryCommand(b.spec)
-	if b.statePath == "" {
-		return command
-	}
-
-	env := []string{"env", "HOME=" + b.statePath}
-	if b.agentType == Codex {
-		env = append(env, "CODEX_HOME="+b.statePath)
-	}
-
-	return append(env, command...)
+	return []string{"/bin/sh", "-lc", b.spec.AttachShellForStatePath(b.statePath)}
 }
 
 func (b *baseAgent) ensureStatePath(ctx context.Context, namespace string) error {
@@ -155,14 +145,5 @@ func NewOpenCodeAgent(repo *git.Repository, kubeCtx, containerName, statePath st
 		statePath:     statePath,
 		spec:          spec,
 		exec:          kubeexec.NewRunner(kubeCtx),
-	}
-}
-
-func agentBinaryCommand(spec RuntimeSpec) []string {
-	switch spec.Type {
-	case Codex:
-		return []string{spec.Binary, "--sandbox", "danger-full-access", "-a", "never"}
-	default:
-		return []string{spec.Binary}
 	}
 }

@@ -18,7 +18,7 @@ GOTEST   := $(GO) test
 GOLINT   := golangci-lint
 TEST_PKGS := $(shell $(GO) list ./... | grep -v '/internal/e2e$$')
 
-.PHONY: all build test test-e2e lint clean install help
+.PHONY: all build test test-e2e lint clean install runtime-images-lock runtime-images-build-local help
 
 all: build
 
@@ -45,6 +45,18 @@ clean:
 ## install: install binary to GOPATH/bin
 install:
 	$(GO) install $(GOFLAGS) -ldflags "$(LDFLAGS)" ./$(BUILD_DIR)
+
+## runtime-images-lock: refresh the toolbox mise.lock for Linux runtime platforms
+runtime-images-lock:
+	env MISE_STATE_DIR=$(CURDIR)/.mise-state MISE_CACHE_DIR=$(CURDIR)/.mise-cache mise trust $(CURDIR)/packaging/runtime-images/toolbox/mise.toml
+	env MISE_STATE_DIR=$(CURDIR)/.mise-state MISE_CACHE_DIR=$(CURDIR)/.mise-cache mise lock --yes --platform linux-arm64,linux-x64 --cd $(CURDIR)/packaging/runtime-images/toolbox
+
+## runtime-images-build-local: build local workspace/toolbox/proxy images for the Colima runtime
+runtime-images-build-local:
+	docker build -f $(CURDIR)/packaging/runtime-images/base/Dockerfile -t ghcr.io/pejas/kagen-base:local $(CURDIR)/packaging/runtime-images/base
+	docker build -f $(CURDIR)/packaging/runtime-images/workspace/Dockerfile -t ghcr.io/pejas/kagen-workspace:local --build-arg KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:local $(CURDIR)/packaging/runtime-images
+	docker build -f $(CURDIR)/packaging/runtime-images/toolbox/Dockerfile -t ghcr.io/pejas/kagen-toolbox:local --build-arg KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:local $(CURDIR)/packaging/runtime-images
+	docker build -f $(CURDIR)/packaging/runtime-images/proxy/Dockerfile -t ghcr.io/pejas/kagen-proxy:local --build-arg KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:local $(CURDIR)/packaging/runtime-images
 
 ## help: show this help
 help:

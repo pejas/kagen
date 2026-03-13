@@ -41,7 +41,7 @@ The `kagen` binary drives a set of coordinators:
 ### 3. Cluster Layer (K3s)
 - **Namespace per Repository**: `kagen-<repo-id>` with labels `kagen.io/scope=repo` and `kagen.io/repo-id=<id>`.
 - **Forgejo**: Lightweight Git service (Deployment + PVC + Service) inside the namespace providing the review boundary.
-- **Agent Pod**: Generated from the internal workload builder, mounts workspace volume at `/projects/workspace`, and injects agent-specific env/config; bootstrap init container clones Forgejo repo.
+- **Agent Pod**: Generated from the internal workload builder, mounts workspace volume at `/projects/workspace`, and injects agent-specific env/config; bootstrap init container clones Forgejo repo, while the runtime toolbox container is expected to arrive prebuilt with its default toolchain and agent CLIs.
 - **Persistence**: PVCs for workspace and agent auth state.
 - **Egress Proxy**: Namespace-scoped proxy workload and network policy used to constrain outbound access. Proxy policy is validated host-side before agent attach and should fail closed when enforcement is not active.
 
@@ -55,7 +55,7 @@ The `kagen` binary drives a set of coordinators:
    - Workload builder: generate the baseline Pod for the requested runtime.
    - Cluster coordinator: inject workspace sync init container, ensure PVCs, create Pod.
    - Session coordinator: persist the kagen session and nested agent session metadata.
-   - Agent coordinator: wait for Pod readiness, wait for runtime-specific bootstrap (e.g., Codex), then attach via shared exec adapter.
+   - Agent coordinator: wait for Pod readiness, verify the prebuilt runtime is ready (for example Codex is already on `PATH`), then attach via shared exec adapter.
 3. **Attach/List**: `kagen attach <agent> [--session <id>]` reuses a persisted session, defaults to the most recent ready session for the current repository when `--session` is omitted, and creates a fresh agent session. `kagen list` reads persisted session summaries after CLI restart.
 4. **Work**: Agent TUI operates inside the Pod. Exiting the TUI with `/exit` or `/quit` only detaches from the agent process.
 5. **Shutdown**: `kagen down` stops the whole Colima/K3s runtime environment without deleting persisted kagen sessions or agent sessions from the local store.

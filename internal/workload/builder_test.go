@@ -36,7 +36,7 @@ func TestBuilderBuildPodBuildsBaselinePodForSupportedAgents(t *testing.T) {
 	}
 }
 
-func TestBuilderBuildPodUsesPinnedBootstrapImageForRuntimeInstallation(t *testing.T) {
+func TestBuilderBuildPodUsesInstallFreeToolboxBootstrap(t *testing.T) {
 	t.Parallel()
 
 	spec, err := agent.SpecFor(agent.Codex)
@@ -58,17 +58,14 @@ func TestBuilderBuildPodUsesPinnedBootstrapImageForRuntimeInstallation(t *testin
 	if runtimeContainer.Image != DefaultImages().Toolbox {
 		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, DefaultImages().Toolbox)
 	}
-	if runtimeContainer.Image != DefaultImages().Workspace {
-		t.Fatalf("runtime container image = %q, want shared bootstrap image %q", runtimeContainer.Image, DefaultImages().Workspace)
+	if len(runtimeContainer.Command) != len(spec.ToolboxBootstrapCommand()) {
+		t.Fatalf("runtime container command length = %d, want %d", len(runtimeContainer.Command), len(spec.ToolboxBootstrapCommand()))
 	}
-	if len(runtimeContainer.Command) != len(spec.LegacyBootstrapCommand()) {
-		t.Fatalf("runtime container command length = %d, want %d", len(runtimeContainer.Command), len(spec.LegacyBootstrapCommand()))
+	if len(runtimeContainer.Args) != len(spec.ToolboxBootstrapArgs()) {
+		t.Fatalf("runtime container args length = %d, want %d", len(runtimeContainer.Args), len(spec.ToolboxBootstrapArgs()))
 	}
-	if len(runtimeContainer.Args) != len(spec.LegacyBootstrapArgs()) {
-		t.Fatalf("runtime container args length = %d, want %d", len(runtimeContainer.Args), len(spec.LegacyBootstrapArgs()))
-	}
-	if !strings.Contains(strings.Join(runtimeContainer.Args, "\n"), "npm install -g @openai/codex") {
-		t.Fatalf("runtime container args should bootstrap codex, got %q", runtimeContainer.Args)
+	if got := runtimeContainer.Args[0]; got != "exec tail -f /dev/null" {
+		t.Fatalf("runtime container args[0] = %q, want install-free keepalive", got)
 	}
 }
 
@@ -132,8 +129,8 @@ func assertBaselinePod(t *testing.T, pod *corev1.Pod, spec agent.RuntimeSpec) {
 	if runtimeContainer.Image != DefaultImages().Toolbox {
 		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, DefaultImages().Toolbox)
 	}
-	assertStringSliceEqual(t, "runtime command", runtimeContainer.Command, spec.LegacyBootstrapCommand())
-	assertStringSliceEqual(t, "runtime args", runtimeContainer.Args, spec.LegacyBootstrapArgs())
+	assertStringSliceEqual(t, "runtime command", runtimeContainer.Command, spec.ToolboxBootstrapCommand())
+	assertStringSliceEqual(t, "runtime args", runtimeContainer.Args, spec.ToolboxBootstrapArgs())
 	assertEnvMatches(t, runtimeContainer.Env, spec.RequiredEnvMap())
 	if !hasMount(runtimeContainer.VolumeMounts, "git-workspace", defaultWorkspaceMount) {
 		t.Fatalf("runtime container missing workspace mount: %#v", runtimeContainer.VolumeMounts)

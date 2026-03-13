@@ -4,8 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
+	"github.com/pejas/kagen/internal/workload"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -91,8 +93,11 @@ func TestProxyContainerUsesPinnedBootstrapImage(t *testing.T) {
 	if len(container.Command) != 2 || container.Command[0] != "/bin/sh" || container.Command[1] != "-lc" {
 		t.Fatalf("proxy container command = %q, want shell bootstrap", container.Command)
 	}
-	if !strings.Contains(strings.Join(container.Args, "\n"), "apk add --no-cache tinyproxy") {
-		t.Fatalf("proxy container args should install tinyproxy during bootstrap: %q", container.Args)
+	if strings.Contains(strings.Join(container.Args, "\n"), "apk add --no-cache tinyproxy") {
+		t.Fatalf("proxy container args should not install tinyproxy during bootstrap: %q", container.Args)
+	}
+	if !strings.Contains(strings.Join(container.Args, "\n"), "exec tinyproxy -d -c") {
+		t.Fatalf("proxy container args should exec a prebuilt tinyproxy binary: %q", container.Args)
 	}
 }
 
@@ -118,8 +123,36 @@ func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
 	if strings.Contains(args[0], "kagen-internal-secret") {
 		t.Fatalf("workspace sync script should not embed forgejo credentials: %q", args[0])
 	}
-	if !strings.Contains(args[0], `git ls-remote "$repo_url"`) {
-		t.Fatalf("workspace sync script missing forgejo availability check: %q", args[0])
+	if strings.Contains(args[0], `repo_url="http://${FORGEJO_USERNAME}:${FORGEJO_PASSWORD}@forgejo:3000/kagen/workspace.git"`) {
+		t.Fatalf("workspace sync script should not embed basic auth in the Forgejo URL: %q", args[0])
+	}
+	if !strings.Contains(args[0], `export GIT_TERMINAL_PROMPT=0`) {
+		t.Fatalf("workspace sync script should disable interactive git prompts: %q", args[0])
+	}
+	if !strings.Contains(args[0], `auth_header="$(printf '%s' "${FORGEJO_USERNAME}:${FORGEJO_PASSWORD}" | base64 | tr -d '\n')"`) {
+		t.Fatalf("workspace sync script missing transient auth header bootstrap: %q", args[0])
+	}
+	if !strings.Contains(args[0], `git -c "http.extraHeader=Authorization: Basic ${auth_header}" ls-remote "$repo_url"`) {
+		t.Fatalf("workspace sync script missing header-auth Forgejo availability check: %q", args[0])
+	}
+	if !strings.Contains(args[0], `git -c "http.extraHeader=Authorization: Basic ${auth_header}" clone "$repo_url" "$worktree"`) {
+		t.Fatalf("workspace sync script missing header-auth clone: %q", args[0])
+	}
+	if got := pod.Spec.InitContainers[0].Image; got != workload.DefaultImages().Workspace {
+		t.Fatalf("workspace sync image = %q, want generated workspace image %q", got, workload.DefaultImages().Workspace)
+	}
+	if !strings.Contains(args[0], "mkdir -p /home/kagen") {
+		t.Fatalf("workspace sync script should prepare the agent home volume: %q", args[0])
+	}
+	if !strings.Contains(args[0], "chown -R 1000:1000 /projects /home/kagen") {
+		t.Fatalf("workspace sync script should hand workspace and home ownership back to the runtime user: %q", args[0])
+	}
+	securityContext := pod.Spec.InitContainers[0].SecurityContext
+	if securityContext == nil || securityContext.RunAsUser == nil || *securityContext.RunAsUser != 0 {
+		t.Fatalf("workspace sync should run as root to prepare the shared workspace volume: %#v", securityContext)
+	}
+	if !hasMount(pod.Spec.InitContainers[0].VolumeMounts, "agent-home", agent.DefaultHomeDir()) {
+		t.Fatalf("workspace sync should mount the shared agent-home volume: %#v", pod.Spec.InitContainers[0].VolumeMounts)
 	}
 
 	env := pod.Spec.InitContainers[0].Env
@@ -189,4 +222,14 @@ func TestEnsureProxyDeploymentAnnotatesConfigChecksum(t *testing.T) {
 	if got := deployment.Annotations[proxyConfigChecksum]; got != checksum {
 		t.Fatalf("proxy config checksum annotation = %q, want %q", got, checksum)
 	}
+}
+
+func hasMount(mounts []corev1.VolumeMount, name, path string) bool {
+	for _, mount := range mounts {
+		if mount.Name == name && mount.MountPath == path {
+			return true
+		}
+	}
+
+	return false
 }

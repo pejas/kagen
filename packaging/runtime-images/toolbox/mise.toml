@@ -1,0 +1,27 @@
+min_version = "2026.3.8"
+
+[tools]
+node = "24"
+pnpm = "latest"
+python = "3.13"
+uv = "latest"
+go = "1.26"
+java = "temurin-25"
+maven = "latest"
+gradle = "latest"
+rust = "stable"
+"cargo:cargo-binstall" = "latest"
+ripgrep = "latest"
+fd = "latest"
+jq = "latest"
+yq = "latest"
+just = "latest"
+bun = "latest"
+deno = "latest"
+"npm:@openai/codex" = "latest"
+"npm:@anthropic-ai/claude-code" = "latest"
+"npm:opencode-ai" = "latest"
+
+[settings]
+lockfile = true
+idiomatic_version_file_enable_tools = ["node"]

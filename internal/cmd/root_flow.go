@@ -167,6 +167,9 @@ func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Reposito
 	if err != nil {
 		return fmt.Errorf("creating cluster manager for proxy validation: %w", err)
 	}
+	if err := manager.EnsureProxyPolicy(ctx, repo); err != nil {
+		return fmt.Errorf("ensuring proxy policy: %w", err)
+	}
 
 	policy.Enforced, err = manager.ProxyReady(ctx, repo)
 	if err != nil {

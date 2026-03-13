@@ -11,6 +11,7 @@ import (
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/ui"
+	"github.com/pejas/kagen/internal/workload"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -111,22 +112,32 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 func injectWorkspaceSync(pod *corev1.Pod, repo *git.Repository) {
 	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
 		Name:    "workspace-sync",
-		Image:   "alpine/git:2.47.2",
+		Image:   workload.DefaultImages().Workspace,
 		Command: []string{"/bin/sh", "-lc"},
 		Args: []string{fmt.Sprintf(`set -eu
-repo_url="http://${FORGEJO_USERNAME}:${FORGEJO_PASSWORD}@forgejo:3000/kagen/workspace.git"
+export GIT_TERMINAL_PROMPT=0
+cd /
+repo_url="http://forgejo:3000/kagen/workspace.git"
+auth_header="$(printf '%%s' "${FORGEJO_USERNAME}:${FORGEJO_PASSWORD}" | base64 | tr -d '\n')"
 worktree=/projects/workspace
 rm -rf "$worktree"
+mkdir -p /projects
+mkdir -p /home/kagen
 for _ in $(seq 1 90); do
-  if git ls-remote "$repo_url" >/dev/null 2>&1; then
+  if git -c "http.extraHeader=Authorization: Basic ${auth_header}" ls-remote "$repo_url" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
-git clone "$repo_url" "$worktree"
+git -c "http.extraHeader=Authorization: Basic ${auth_header}" clone "$repo_url" "$worktree"
 cd "$worktree"
 git checkout %q 2>/dev/null || git checkout --track -b %q "origin/%s"
+chown -R 1000:1000 /projects /home/kagen
 `, repo.KagenBranch(), repo.KagenBranch(), repo.KagenBranch())},
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:  int64Ptr(0),
+			RunAsGroup: int64Ptr(0),
+		},
 		Env: []corev1.EnvVar{
 			{
 				Name: "FORGEJO_USERNAME",
@@ -151,6 +162,10 @@ git checkout %q 2>/dev/null || git checkout --track -b %q "origin/%s"
 			{
 				Name:      "git-workspace",
 				MountPath: "/projects",
+			},
+			{
+				Name:      "agent-home",
+				MountPath: agent.DefaultHomeDir(),
 			},
 		},
 	})
@@ -250,6 +265,10 @@ func setContainerEnv(container *corev1.Container, name, value string) {
 
 func policyEnabled(policy *proxy.Policy) bool {
 	return policy != nil && len(policy.AllowedDestinations) > 0
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
 }
 
 // AttachAgent connects the current terminal to the agent process.

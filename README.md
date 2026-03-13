@@ -72,6 +72,8 @@ For Codex, Kagen now:
 - persists Codex state in a dedicated PVC mounted at `/home/kagen/.codex`,
 - launches Codex with `danger-full-access` and `never` approval mode inside the VM, not on the host.
 
+The runtime bootstrap path now assumes prebuilt toolbox and proxy artefacts. Pod startup no longer installs agent CLIs or proxy packages with `apt-get`, `npm install`, or similar package-manager steps.
+
 Existing repository `devfile.yaml` files are treated as legacy repository artefacts: `kagen config write` does not create them, and `kagen start` and `kagen attach` ignore them.
 
 Leaving an agent TUI with `/exit` or `/quit` only detaches from that tool. `kagen config write` only writes optional repo defaults. `kagen down` stops the whole local Colima/K3s runtime environment, while persisted kagen sessions and agent sessions remain in the local store and continue to appear in `kagen list`.
@@ -134,3 +136,4 @@ Local tooling expected by the checked-in workflow:
 `make test` intentionally excludes `internal/e2e` so the default validation loop stays fast and does not require the full local runtime stack. Use `make test-e2e` when you specifically want end-to-end coverage. The repository CI contract mirrors `make build`, `make test`, and `make lint`.
 
 Runtime artefacts are release-managed. See [docs/RUNTIME-ARTEFACTS.md](docs/RUNTIME-ARTEFACTS.md) for the current image set and update procedure.
+The Phase 1 first-party image scaffold lives under `packaging/runtime-images/`, with the default toolbox toolchain declared in `packaging/runtime-images/toolbox/mise.toml` and frozen in `packaging/runtime-images/toolbox/mise.lock`.
