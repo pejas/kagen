@@ -11,6 +11,7 @@ import (
 
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
+	"github.com/pejas/kagen/internal/ui"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -24,7 +25,7 @@ const (
 	proxyServiceName    = "egress-proxy"
 	proxyPolicyName     = "egress-proxy-egress"
 	proxyConfigMapName  = "egress-proxy-config"
-	proxyImage          = "docker.io/alpine:3.22"
+	proxyImage          = "ghcr.io/pejas/kagen-proxy:2026-03-12"
 	proxyPort           = 8888
 	proxyConfigDir      = "/etc/kagen-proxy"
 	proxyConfigChecksum = "kagen.io/proxy-config-sha256"
@@ -34,8 +35,10 @@ const (
 func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 	if policy == nil || len(policy.AllowedDestinations) == 0 {
+		ui.Verbose("Deleting proxy resources in %s because no allowlist is configured", nsName)
 		return k.deleteProxyResources(ctx, nsName)
 	}
+	ui.Verbose("Reconciling proxy resources in %s for %d destination(s)", nsName, len(policy.AllowedDestinations))
 
 	checksum, err := k.ensureProxyConfig(ctx, nsName, repo.ID(), policy)
 	if err != nil {
@@ -194,36 +197,7 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
-						{
-							Name:    "proxy",
-							Image:   proxyImage,
-							Command: []string{"/bin/sh", "-lc"},
-							Args: []string{
-								`set -eu
-apk add --no-cache tinyproxy >/dev/null
-exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`,
-							},
-							Ports: []corev1.ContainerPort{
-								{
-									Name:          "http",
-									ContainerPort: proxyPort,
-								},
-							},
-							ReadinessProbe: &corev1.Probe{
-								ProbeHandler: corev1.ProbeHandler{
-									TCPSocket: &corev1.TCPSocketAction{
-										Port: intstr.FromInt(proxyPort),
-									},
-								},
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{
-									Name:      "config",
-									MountPath: proxyConfigDir,
-									ReadOnly:  true,
-								},
-							},
-						},
+						proxyContainer(),
 					},
 					Volumes: []corev1.Volume{
 						{
@@ -264,6 +238,35 @@ exec tinyproxy -d -c ` + proxyConfigDir + `/tinyproxy.conf`,
 	}
 
 	return nil
+}
+
+func proxyContainer() corev1.Container {
+	return corev1.Container{
+		Name:    "proxy",
+		Image:   proxyImage,
+		Command: []string{"tinyproxy"},
+		Args:    []string{"-d", "-c", proxyConfigDir + "/tinyproxy.conf"},
+		Ports: []corev1.ContainerPort{
+			{
+				Name:          "http",
+				ContainerPort: proxyPort,
+			},
+		},
+		ReadinessProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				TCPSocket: &corev1.TCPSocketAction{
+					Port: intstr.FromInt(proxyPort),
+				},
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "config",
+				MountPath: proxyConfigDir,
+				ReadOnly:  true,
+			},
+		},
+	}
 }
 
 func (k *KubeManager) ensureProxyService(ctx context.Context, namespace, repoID string) error {
@@ -425,17 +428,23 @@ func (k *KubeManager) ensureAgentNetworkPolicy(ctx context.Context, namespace, r
 
 func (k *KubeManager) waitForProxyReady(ctx context.Context, namespace string) error {
 	deadline := time.Now().Add(2 * time.Minute)
+	attempt := 0
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+			attempt++
 			deployment, err := k.client.AppsV1().Deployments(namespace).Get(ctx, proxyDeploymentName, metav1.GetOptions{})
 			if err == nil && deployment.Status.ReadyReplicas > 0 {
+				ui.Verbose("Proxy deployment %s/%s is ready after %d attempt(s)", namespace, proxyDeploymentName, attempt)
 				return nil
 			}
 			if err != nil && !k8serrors.IsNotFound(err) {
 				return fmt.Errorf("getting proxy deployment: %w", err)
+			}
+			if ui.VerboseEnabled() && (attempt == 1 || attempt%5 == 0) {
+				ui.Verbose("Waiting for proxy deployment %s/%s readiness (attempt %d)", namespace, proxyDeploymentName, attempt)
 			}
 			if err := waitForRetry(ctx, 2*time.Second); err != nil {
 				return err

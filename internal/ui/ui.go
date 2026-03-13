@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // ANSI color codes for terminal output.
@@ -19,9 +20,30 @@ const (
 	colorBold   = "\033[1m"
 )
 
+var verboseMode atomic.Bool
+
 // Info prints an informational message to stdout.
 func Info(format string, args ...any) {
 	fmt.Printf(colorCyan+"ℹ "+colorReset+format+"\n", args...)
+}
+
+// SetVerbose configures whether verbose output is emitted.
+func SetVerbose(enabled bool) {
+	verboseMode.Store(enabled)
+}
+
+// VerboseEnabled reports whether verbose output is enabled.
+func VerboseEnabled() bool {
+	return verboseMode.Load()
+}
+
+// Verbose prints an informational message only when verbose mode is enabled.
+func Verbose(format string, args ...any) {
+	if !VerboseEnabled() {
+		return
+	}
+
+	fmt.Printf(colorCyan+"- "+colorReset+format+"\n", args...)
 }
 
 // Warn prints a warning message to stderr.

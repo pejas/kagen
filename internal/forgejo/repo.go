@@ -10,39 +10,43 @@ import (
 	"time"
 
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/ui"
 )
 
 // ImportRepo ensures the repository exists in Forgejo and prepares it for the first push.
 func (f *ForgejoService) ImportRepo(ctx context.Context, repo *git.Repository) error {
-	ns := fmt.Sprintf("kagen-%s", repo.ID())
+	ns := forgejoNamespace(repo)
 	podName, err := f.getForgejoPod(ctx, ns)
 	if err != nil {
 		return err
 	}
+	ui.Verbose("Using Forgejo pod %s/%s for repository import", ns, podName)
 	if err := f.ensureAdminUser(ctx, ns, podName); err != nil {
 		return err
 	}
 
-	localPort, err := f.ensureForgejoRepo(ctx, ns, podName)
+	auth, err := f.credentials(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("loading forgejo credentials: %w", err)
+	}
+
+	session, err := f.ensureForgejoRepo(ctx, ns, podName, auth)
 	if err != nil {
 		return err
 	}
-	defer f.pf.Stop()
+	defer func() {
+		_ = session.Stop()
+	}()
 
-	remoteURL := fmt.Sprintf("http://kagen:kagen-internal-secret@127.0.0.1:%d/kagen/workspace.git", localPort)
-	if err := repo.AddRemote("kagen", remoteURL); err != nil {
-		return fmt.Errorf("configuring forgejo remote: %w", err)
-	}
-
-	return f.pushRepo(ctx, repo)
+	return f.pushRepo(ctx, repo, session)
 }
 
 func (f *ForgejoService) ensureAdminUser(ctx context.Context, namespace, podName string) error {
 	createAdminCmd := []string{
 		"forgejo", "--config", forgejoConfigPath, "admin", "user", "create",
-		"--username", "kagen",
-		"--password", "kagen-internal-secret",
-		"--email", "kagen@internal.local",
+		"--username", forgejoAdminUsername,
+		"--password", forgejoAdminPassword,
+		"--email", forgejoAdminUsername + "@internal.local",
 		"--admin",
 		"--must-change-password=false",
 	}
@@ -51,10 +55,14 @@ func (f *ForgejoService) ensureAdminUser(ctx context.Context, namespace, podName
 	for i := 0; i < 5; i++ {
 		out, err := f.exec.Run(ctx, namespace, podName, createAdminCmd)
 		if err == nil || strings.Contains(out, "already exists") || (err != nil && strings.Contains(err.Error(), "already exists")) {
+			ui.Verbose("Forgejo admin user %q is ready", forgejoAdminUsername)
 			lastErr = nil
 			break
 		}
 		lastErr = fmt.Errorf("kubectl exec %s/%s: %s: %w", namespace, podName, out, err)
+		if ui.VerboseEnabled() {
+			ui.Verbose("Forgejo admin bootstrap retry %d/5 failed: %v", i+1, lastErr)
+		}
 		if sleepErr := sleepContext(ctx, 2*time.Second); sleepErr != nil {
 			return sleepErr
 		}
@@ -76,47 +84,66 @@ func (f *ForgejoService) ensureAdminUser(ctx context.Context, namespace, podName
 	return sleepContext(ctx, 2*time.Second)
 }
 
-func (f *ForgejoService) ensureForgejoRepo(ctx context.Context, namespace, podName string) (int, error) {
+func (f *ForgejoService) ensureForgejoRepo(ctx context.Context, namespace, podName string, auth *git.BasicAuth) (*ReviewSession, error) {
 	var (
-		lastErr   error
-		localPort int
+		lastErr error
+		session *ReviewSession
 	)
 
 	for i := 0; i < 5; i++ {
-		localPort, lastErr = f.pf.Start(ctx, namespace, "pod/"+podName, 0, 3000)
+		forward, err := f.pf.Start(ctx, namespace, "pod/"+podName, 0, forgejoServiceHTTPPort)
+		lastErr = err
 		if lastErr != nil {
 			lastErr = fmt.Errorf("starting port-forward to forgejo: %w", lastErr)
+			if ui.VerboseEnabled() {
+				ui.Verbose("Forgejo repo bootstrap port-forward retry %d/5 failed: %v", i+1, lastErr)
+			}
 			if sleepErr := sleepContext(ctx, time.Second); sleepErr != nil {
-				return 0, sleepErr
+				return nil, sleepErr
 			}
 			continue
 		}
 
+		localPort := forward.LocalPort()
 		if err := f.waitForAPI(ctx, localPort); err != nil {
-			_ = f.pf.Stop()
+			_ = forward.Stop()
 			lastErr = err
+			if ui.VerboseEnabled() {
+				ui.Verbose("Forgejo repo bootstrap API wait retry %d/5 failed: %v", i+1, lastErr)
+			}
 			if sleepErr := sleepContext(ctx, time.Second); sleepErr != nil {
-				return 0, sleepErr
+				return nil, sleepErr
 			}
 			continue
 		}
 
-		if err := f.createRepo(ctx, localPort, "workspace"); err != nil {
-			_ = f.pf.Stop()
+		session = &ReviewSession{
+			baseURL: fmt.Sprintf("http://127.0.0.1:%d", localPort),
+			repoURL: fmt.Sprintf("http://127.0.0.1:%d/%s/%s.git", localPort, forgejoRepoOwner, forgejoRepoName),
+			auth:    auth,
+			forward: forward,
+		}
+
+		if err := f.createRepo(ctx, session, forgejoRepoName); err != nil {
+			_ = forward.Stop()
 			lastErr = err
+			if ui.VerboseEnabled() {
+				ui.Verbose("Forgejo repo creation retry %d/5 failed: %v", i+1, lastErr)
+			}
 			if sleepErr := sleepContext(ctx, time.Second); sleepErr != nil {
-				return 0, sleepErr
+				return nil, sleepErr
 			}
 			continue
 		}
 
-		return localPort, nil
+		ui.Verbose("Forgejo repository %s/%s is ready", forgejoRepoOwner, forgejoRepoName)
+		return session, nil
 	}
 
-	return 0, fmt.Errorf("failed to create forgejo repo after retries: %w", lastErr)
+	return nil, fmt.Errorf("failed to create forgejo repo after retries: %w", lastErr)
 }
 
-func (f *ForgejoService) pushRepo(ctx context.Context, repo *git.Repository) error {
+func (f *ForgejoService) pushRepo(ctx context.Context, repo *git.Repository, session *ReviewSession) error {
 	refspecs := []string{
 		"HEAD:" + repo.CurrentBranch,
 		"HEAD:" + repo.KagenBranch(),
@@ -124,10 +151,14 @@ func (f *ForgejoService) pushRepo(ctx context.Context, repo *git.Repository) err
 
 	var lastErr error
 	for i := 0; i < 5; i++ {
-		if err := repo.PushRefspecs(ctx, "kagen", refspecs...); err == nil {
+		if err := repo.PushURL(ctx, session.repoURL, session.auth, refspecs...); err == nil {
+			ui.Verbose("Pushed canonical and review refs to Forgejo on attempt %d", i+1)
 			return nil
 		} else {
 			lastErr = err
+			if ui.VerboseEnabled() {
+				ui.Verbose("Forgejo push retry %d/5 failed: %v", i+1, lastErr)
+			}
 			if sleepErr := sleepContext(ctx, time.Second); sleepErr != nil {
 				return sleepErr
 			}
@@ -137,36 +168,8 @@ func (f *ForgejoService) pushRepo(ctx context.Context, repo *git.Repository) err
 	return fmt.Errorf("pushing to forgejo: %w", lastErr)
 }
 
-func (f *ForgejoService) waitForAPI(ctx context.Context, port int) error {
-	versionURL := fmt.Sprintf("http://127.0.0.1:%d/api/v1/version", port)
-
-	for i := 0; i < 30; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
-			if err != nil {
-				return fmt.Errorf("creating forgejo API readiness request: %w", err)
-			}
-			resp, err := f.httpClient.Do(req)
-			if err == nil {
-				resp.Body.Close()
-				if resp.StatusCode == http.StatusOK {
-					return nil
-				}
-			}
-			if sleepErr := sleepContext(ctx, 500*time.Millisecond); sleepErr != nil {
-				return sleepErr
-			}
-		}
-	}
-
-	return fmt.Errorf("timed out waiting for forgejo API on local port %d", port)
-}
-
-func (f *ForgejoService) createRepo(ctx context.Context, port int, name string) error {
-	apiURL := fmt.Sprintf("http://127.0.0.1:%d/api/v1/user/repos", port)
+func (f *ForgejoService) createRepo(ctx context.Context, session *ReviewSession, name string) error {
+	apiURL := session.baseURL + "/api/v1/user/repos"
 	body, err := json.Marshal(map[string]interface{}{
 		"name":           name,
 		"private":        true,
@@ -181,7 +184,7 @@ func (f *ForgejoService) createRepo(ctx context.Context, port int, name string) 
 	if err != nil {
 		return fmt.Errorf("creating forgejo repo request: %w", err)
 	}
-	req.SetBasicAuth("kagen", "kagen-internal-secret")
+	req.SetBasicAuth(session.auth.Username, session.auth.Password)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := f.httpClient.Do(req)

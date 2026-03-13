@@ -263,8 +263,13 @@ func TestFeatures(t *testing.T) {
 	suite := godog.TestSuite{
 		ScenarioInitializer: InitializeScenario,
 		Options: &godog.Options{
-			Format:   "pretty",
-			Paths:    []string{"../../features"},
+			Format: "pretty",
+			// Keep the default E2E suite focused on runtime contracts that are
+			// materially hard to prove below the full CLI/runtime boundary.
+			Paths: []string{
+				"../../features/workflow.feature",
+				"../../features/pull.feature",
+			},
 			TestingT: t,
 		},
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pejas/kagen/internal/config"
+	"github.com/pejas/kagen/internal/ui"
 )
 
 const (
@@ -28,6 +29,7 @@ func NewColimaManager(cfg config.RuntimeConfig) *ColimaManager {
 // EnsureRunning starts Colima if it is not already running.
 func (c *ColimaManager) EnsureRunning(ctx context.Context) error {
 	// 1. Check dependencies first.
+	ui.Verbose("Checking runtime dependencies")
 	if err := CheckConfigDependencies(); err != nil {
 		return err
 	}
@@ -37,8 +39,10 @@ func (c *ColimaManager) EnsureRunning(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("checking status: %w", err)
 	}
+	ui.Verbose("Colima profile %q status is %s", colimaProfile, status)
 
 	if status == StatusRunning {
+		ui.Verbose("Reusing existing kube context %s", kubeContext)
 		return nil
 	}
 
@@ -51,6 +55,13 @@ func (c *ColimaManager) EnsureRunning(ctx context.Context) error {
 		"--memory", fmt.Sprintf("%d", c.cfg.Memory),
 		"--disk", fmt.Sprintf("%d", c.cfg.Disk),
 	}
+	ui.Verbose(
+		"Starting Colima profile %q with cpu=%d memory=%dGi disk=%dGi",
+		colimaProfile,
+		c.cfg.CPU,
+		c.cfg.Memory,
+		c.cfg.Disk,
+	)
 
 	cmd := exec.CommandContext(ctx, "colima", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -58,6 +69,7 @@ func (c *ColimaManager) EnsureRunning(ctx context.Context) error {
 	}
 
 	// 4. Verify K3s health.
+	ui.Verbose("Colima started; waiting for Kubernetes readiness on context %s", kubeContext)
 	return c.waitReady(ctx)
 }
 
@@ -72,9 +84,11 @@ func (c *ColimaManager) Stop(ctx context.Context) error {
 		return fmt.Errorf("checking status: %w", err)
 	}
 	if status == StatusStopped {
+		ui.Verbose("Colima profile %q is already stopped", colimaProfile)
 		return nil
 	}
 
+	ui.Verbose("Stopping Colima profile %q", colimaProfile)
 	cmd := exec.CommandContext(ctx, "colima", "stop", "--profile", colimaProfile)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("stopping colima: %w (output: %s)", err, string(out))
@@ -112,21 +126,43 @@ func (c *ColimaManager) waitReady(ctx context.Context) error {
 	if err != nil {
 		timeout = 5 * time.Minute
 	}
+	ui.Verbose("Waiting up to %s for Kubernetes nodes to become ready", timeout)
 
 	deadline := time.Now().Add(timeout)
+	attempt := 0
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+			attempt++
 			// check if node is ready
 			checkCmd := exec.CommandContext(ctx, "kubectl", "--context", kubeContext, "get", "nodes")
-			if err := checkCmd.Run(); err == nil {
+			out, err := checkCmd.CombinedOutput()
+			if err == nil {
+				ui.Verbose("Kubernetes readiness succeeded on attempt %d", attempt)
 				return nil
+			}
+			if ui.VerboseEnabled() && (attempt == 1 || attempt%3 == 0) {
+				ui.Verbose("Kubernetes readiness attempt %d still pending: %s", attempt, trimCommandOutput(string(out)))
 			}
 			time.Sleep(5 * time.Second)
 		}
 	}
 
 	return fmt.Errorf("timed out waiting for kubernetes node to be ready")
+}
+
+func trimCommandOutput(out string) string {
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return "no command output"
+	}
+
+	trimmed = strings.Join(strings.Fields(trimmed), " ")
+	if len(trimmed) > 160 {
+		return trimmed[:157] + "..."
+	}
+
+	return trimmed
 }

@@ -37,6 +37,9 @@ and uses an in-cluster Forgejo instance as the review and durability boundary
 for agent work.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	PersistentPreRun: func(_ *cobra.Command, _ []string) {
+		ui.SetVerbose(verboseFlag)
+	},
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return cmd.Help()
 	},

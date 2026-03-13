@@ -9,8 +9,40 @@ import (
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/config"
 	"github.com/pejas/kagen/internal/git"
+	"github.com/pejas/kagen/internal/ui"
 	"github.com/pejas/kagen/internal/workload"
 )
+
+func TestLoadRunConfigHonoursVerboseFlag(t *testing.T) {
+	previousVerbose := verboseFlag
+	previousUIVerbose := ui.VerboseEnabled()
+	verboseFlag = true
+	t.Cleanup(func() {
+		verboseFlag = previousVerbose
+		ui.SetVerbose(previousUIVerbose)
+	})
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() returned error: %v", err)
+	}
+
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Chdir(%q) returned error: %v", tempDir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+
+	cfg, err := loadRunConfig()
+	if err != nil {
+		t.Fatalf("loadRunConfig() returned error: %v", err)
+	}
+	if !cfg.Verbose {
+		t.Fatal("loadRunConfig() should enable verbose mode when --verbose is set")
+	}
+}
 
 func TestBuildRuntimePodUsesInternalWorkloadBuilderWithoutDevfile(t *testing.T) {
 	t.Parallel()

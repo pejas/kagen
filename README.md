@@ -15,10 +15,12 @@ Changes made by the agent are accumulated in an isolated, in-cluster Forgejo ins
 Quick docs:
 - [Internals Blueprint](docs/INTERNALS-BLUEPRINT.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [E2E Scope](docs/E2E.md)
+- [Maintainer Checklist](docs/MAINTAINER-CHECKLIST.md)
 
 ### Installation
 
-Requires Go 1.23+.
+Requires Go 1.26.1, matching `go.mod`.
 
 ```bash
 git clone https://github.com/pejas/kagen.git
@@ -86,11 +88,15 @@ Open the review page for the current branch:
 kagen open
 ```
 
+`kagen open` now establishes its own local Forgejo review tunnel and keeps it open until you interrupt the command.
+
 Pull reviewed changes back into the local branch:
 
 ```bash
 kagen pull
 ```
+
+`kagen start`, `kagen open`, and `kagen pull` use transient Forgejo transport. They do not persist a credentialed `kagen` remote or ephemeral localhost port into the host repository's `.git/config`.
 
 ### Development
 
@@ -106,10 +112,25 @@ Run tests:
 make test
 ```
 
+Run lint:
+
+```bash
+make lint
+```
+
 Run the end-to-end suite explicitly:
 
 ```bash
 make test-e2e
 ```
 
-`make test` intentionally excludes `internal/e2e` so the default validation loop stays fast and does not require the full local runtime stack. Use `make test-e2e` when you specifically want end-to-end coverage.
+Local tooling expected by the checked-in workflow:
+
+- Go matching `go.mod`
+- `golangci-lint` v1.64.8 or newer
+- `kubectl`
+- `colima` for runtime-backed manual or E2E validation
+
+`make test` intentionally excludes `internal/e2e` so the default validation loop stays fast and does not require the full local runtime stack. Use `make test-e2e` when you specifically want end-to-end coverage. The repository CI contract mirrors `make build`, `make test`, and `make lint`.
+
+Runtime artefacts are release-managed. See [docs/RUNTIME-ARTEFACTS.md](docs/RUNTIME-ARTEFACTS.md) for the current image set and update procedure.

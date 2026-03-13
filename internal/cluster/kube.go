@@ -10,11 +10,18 @@ import (
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
+	"github.com/pejas/kagen/internal/ui"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+)
+
+const (
+	forgejoBootstrapSecretName = "forgejo-bootstrap-auth"
+	forgejoSecretUsernameKey   = "username"
+	forgejoSecretPasswordKey   = "password"
 )
 
 // KubeManager implements ClusterManager interface using client-go.
@@ -38,6 +45,7 @@ func NewKubeManager(kubeCtx string) (*KubeManager, error) {
 // EnsureNamespace ensures the repo-scoped namespace exists.
 func (k *KubeManager) EnsureNamespace(ctx context.Context, repo *git.Repository) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
+	ui.Verbose("Ensuring namespace %s exists", nsName)
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nsName,
@@ -72,6 +80,7 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 	pod.Labels["kagen.io/repo-id"] = repo.ID()
 	injectWorkspaceSync(pod, repo)
 	injectAgentRuntime(pod, agentType, nsName, policy)
+	ui.Verbose("Reconciling pod %s/%s", nsName, pod.Name)
 
 	// 2. Ensure PVCs for volumes requested by the generated runtime pod.
 	for _, v := range pod.Spec.Volumes {
@@ -105,18 +114,39 @@ func injectWorkspaceSync(pod *corev1.Pod, repo *git.Repository) {
 		Image:   "alpine/git:2.47.2",
 		Command: []string{"/bin/sh", "-lc"},
 		Args: []string{fmt.Sprintf(`set -eu
+repo_url="http://${FORGEJO_USERNAME}:${FORGEJO_PASSWORD}@forgejo:3000/kagen/workspace.git"
 worktree=/projects/workspace
 rm -rf "$worktree"
 for _ in $(seq 1 90); do
-  if git ls-remote "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git" >/dev/null 2>&1; then
+  if git ls-remote "$repo_url" >/dev/null 2>&1; then
     break
   fi
   sleep 2
 done
-git clone "http://kagen:kagen-internal-secret@forgejo:3000/kagen/workspace.git" "$worktree"
+git clone "$repo_url" "$worktree"
 cd "$worktree"
 git checkout %q 2>/dev/null || git checkout --track -b %q "origin/%s"
 `, repo.KagenBranch(), repo.KagenBranch(), repo.KagenBranch())},
+		Env: []corev1.EnvVar{
+			{
+				Name: "FORGEJO_USERNAME",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: forgejoBootstrapSecretName},
+						Key:                  forgejoSecretUsernameKey,
+					},
+				},
+			},
+			{
+				Name: "FORGEJO_PASSWORD",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: forgejoBootstrapSecretName},
+						Key:                  forgejoSecretPasswordKey,
+					},
+				},
+			},
+		},
 		VolumeMounts: []corev1.VolumeMount{
 			{
 				Name:      "git-workspace",

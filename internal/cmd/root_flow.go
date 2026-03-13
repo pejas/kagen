@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/cluster"
@@ -40,6 +41,8 @@ func discoverRepository() (*git.Repository, error) {
 		return nil, fmt.Errorf("getting working directory: %w", err)
 	}
 
+	ui.Verbose("Discovering repository from %s", cwd)
+
 	repo, err := git.Discover(cwd)
 	if err != nil {
 		if errors.Is(err, kagerr.ErrNotGitRepo) {
@@ -49,6 +52,7 @@ func discoverRepository() (*git.Repository, error) {
 	}
 
 	ui.Info("Repository: %s (branch: %s)", repo.Path, repo.CurrentBranch)
+	ui.Verbose("Resolved repo id=%s head=%s", repo.ID(), repo.HeadSHA)
 	return repo, nil
 }
 
@@ -57,6 +61,15 @@ func loadRunConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("loading configuration: %w", err)
 	}
+
+	cfg.Verbose = cfg.Verbose || verboseFlag
+	ui.SetVerbose(cfg.Verbose)
+	ui.Verbose(
+		"Loaded config: default agent=%q forgejo_http_port=%d startup_timeout=%s",
+		cfg.Agent,
+		cfg.ForgejoHTTPPort,
+		cfg.Runtime.StartupTimeout,
+	)
 
 	return cfg, nil
 }
@@ -68,6 +81,7 @@ func ensureRuntime(ctx context.Context, cfg *config.Config) (string, error) {
 		return "", fmt.Errorf("runtime not available: %w", err)
 	}
 
+	ui.Verbose("Runtime healthy with kube context %s", manager.KubeContext())
 	return manager.KubeContext(), nil
 }
 
@@ -89,6 +103,7 @@ func ensureForgejoImport(ctx context.Context, svc *forgejo.ForgejoService, repo 
 	ui.Info("Import provenance: %s@%s (%s)", rec.SourceBranch, rec.SourceCommitSHA[:8], rec.ImportedAt.Format("2006-01-02T15:04:05Z"))
 
 	ui.Info("Importing repository to Forgejo...")
+	ui.Verbose("Ensuring Forgejo repo boundary for namespace %s", fmt.Sprintf("kagen-%s", repo.ID()))
 	if err := svc.EnsureRepo(ctx, repo); err != nil {
 		return fmt.Errorf("ensuring forgejo repo: %w", err)
 	}
@@ -96,6 +111,7 @@ func ensureForgejoImport(ctx context.Context, svc *forgejo.ForgejoService, repo 
 		return fmt.Errorf("importing to forgejo: %w", err)
 	}
 
+	ui.Verbose("Forgejo import finished for %s", repo.KagenBranch())
 	return nil
 }
 
@@ -107,6 +123,7 @@ func ensureClusterResources(
 	agentType agent.Type,
 ) error {
 	ui.Info("Ensuring cluster resources for %s/%s...", agentType, repo.CurrentBranch)
+	ui.Verbose("Reconciling namespace kagen-%s", repo.ID())
 	manager, err := cluster.NewKubeManager(kubeCtx)
 	if err != nil {
 		return fmt.Errorf("cluster not available (is the kagen Colima profile running?): %w", err)
@@ -118,10 +135,20 @@ func ensureClusterResources(
 	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
 		return fmt.Errorf("ensuring proxy: %w", err)
 	}
+	if len(policy.AllowedDestinations) == 0 {
+		ui.Verbose("Proxy policy disabled for %s", agentType)
+	} else {
+		ui.Verbose("Proxy policy requires %d allowed destination(s)", len(policy.AllowedDestinations))
+	}
 	pod, err := buildRuntimePod(repo, cfg, agentType)
 	if err != nil {
 		return err
 	}
+	containerNames := make([]string, 0, len(pod.Spec.Containers))
+	for _, container := range pod.Spec.Containers {
+		containerNames = append(containerNames, container.Name)
+	}
+	ui.Verbose("Built runtime pod %s/%s with containers: %s", pod.Namespace, pod.Name, strings.Join(containerNames, ", "))
 	if err := manager.EnsureResources(ctx, repo, string(agentType), pod, policy); err != nil {
 		return fmt.Errorf("ensuring resources: %w", err)
 	}
@@ -132,6 +159,7 @@ func ensureClusterResources(
 func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Repository, cfg *config.Config, agentType agent.Type) error {
 	policy := proxy.LoadPolicy(cfg, string(agentType))
 	if len(policy.AllowedDestinations) == 0 {
+		ui.Verbose("Skipping proxy readiness validation: no allowlist configured for %s", agentType)
 		return nil
 	}
 
@@ -144,19 +172,12 @@ func validateProxyPolicy(ctx context.Context, kubeCtx string, repo *git.Reposito
 	if err != nil {
 		return fmt.Errorf("checking proxy readiness: %w", err)
 	}
+	ui.Verbose("Proxy readiness for kagen-%s: enforced=%t", repo.ID(), policy.Enforced)
 	if err := policy.Validate(); err != nil {
 		return fmt.Errorf("validating proxy policy: %w", err)
 	}
 
 	return nil
-}
-
-func launchAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type) error {
-	if err := launchAgentRuntime(ctx, repo, kubeCtx, agentType); err != nil {
-		return err
-	}
-
-	return attachAgent(ctx, repo, kubeCtx, agentType, session.AgentSession{})
 }
 
 func launchAgentRuntime(ctx context.Context, repo *git.Repository, kubeCtx string, agentType agent.Type) error {
@@ -167,6 +188,7 @@ func launchAgentRuntime(ctx context.Context, repo *git.Repository, kubeCtx strin
 
 	ui.Info("Launching agent %s...", agentType)
 	registry := agent.NewRegistry(repo, kubeCtx).WithContainer(spec.ContainerName())
+	ui.Verbose("Launching container %s in namespace kagen-%s", spec.ContainerName(), repo.ID())
 	a, err := registry.Get(agentType)
 	if err != nil {
 		return err
