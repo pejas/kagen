@@ -3,13 +3,13 @@ name: Docker Publish
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Image tag to use (defaults to short commit SHA)'
+        description: "Image tag to use (defaults to short commit SHA)"
         required: false
-        default: ''
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -87,7 +87,7 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 30
-          retry_wait_seconds: 10
+          retry_wait_seconds: 30
           command: docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ github.ref_name }}"
 
   build-and-push-dependents:
