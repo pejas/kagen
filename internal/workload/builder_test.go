@@ -5,8 +5,17 @@ import (
 	"testing"
 
 	"github.com/pejas/kagen/internal/agent"
+	"github.com/pejas/kagen/internal/config"
 	corev1 "k8s.io/api/core/v1"
 )
+
+func testImages() Images {
+	cfg := config.DefaultConfig()
+	return Images{
+		Workspace: cfg.Images.Workspace,
+		Toolbox:   cfg.Images.Toolbox,
+	}
+}
 
 func TestBuilderBuildPodBuildsBaselinePodForSupportedAgents(t *testing.T) {
 	t.Parallel()
@@ -26,6 +35,7 @@ func TestBuilderBuildPodBuildsBaselinePodForSupportedAgents(t *testing.T) {
 				Name:      "agent",
 				Namespace: "kagen-test",
 				Runtime:   spec,
+				Images:    testImages(),
 			})
 			if err != nil {
 				t.Fatalf("BuildPod() returned error: %v", err)
@@ -49,14 +59,15 @@ func TestBuilderBuildPodUsesInstallFreeToolboxBootstrap(t *testing.T) {
 		Name:      "agent",
 		Namespace: "kagen-test",
 		Runtime:   spec,
+		Images:    testImages(),
 	})
 	if err != nil {
 		t.Fatalf("BuildPod() returned error: %v", err)
 	}
 
 	runtimeContainer := pod.Spec.Containers[1]
-	if runtimeContainer.Image != DefaultImages().Toolbox {
-		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, DefaultImages().Toolbox)
+	if runtimeContainer.Image != testImages().Toolbox {
+		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, testImages().Toolbox)
 	}
 	if len(runtimeContainer.Command) != len(spec.ToolboxBootstrapCommand()) {
 		t.Fatalf("runtime container command length = %d, want %d", len(runtimeContainer.Command), len(spec.ToolboxBootstrapCommand()))
@@ -69,10 +80,10 @@ func TestBuilderBuildPodUsesInstallFreeToolboxBootstrap(t *testing.T) {
 	}
 }
 
-func TestDefaultImagesAreReleasePinned(t *testing.T) {
+func TestConfigDerivedImagesAreReleasePinned(t *testing.T) {
 	t.Parallel()
 
-	images := DefaultImages()
+	images := testImages()
 	if strings.Contains(images.Workspace, ":latest") {
 		t.Fatalf("workspace image should not use a mutable latest tag: %q", images.Workspace)
 	}
@@ -85,7 +96,7 @@ func TestBuilderBuildPodRequiresRuntimeType(t *testing.T) {
 	t.Parallel()
 
 	builder := NewBuilder()
-	if _, err := builder.BuildPod(Request{Name: "agent", Namespace: "kagen-test"}); err == nil {
+	if _, err := builder.BuildPod(Request{Name: "agent", Namespace: "kagen-test", Images: testImages()}); err == nil {
 		t.Fatal("BuildPod() expected error for missing runtime")
 	}
 }
@@ -113,8 +124,8 @@ func assertBaselinePod(t *testing.T, pod *corev1.Pod, spec agent.RuntimeSpec) {
 	if workspaceContainer.Name != defaultWorkspaceName {
 		t.Fatalf("workspace container name = %q, want %q", workspaceContainer.Name, defaultWorkspaceName)
 	}
-	if workspaceContainer.Image != DefaultImages().Workspace {
-		t.Fatalf("workspace container image = %q, want %q", workspaceContainer.Image, DefaultImages().Workspace)
+	if workspaceContainer.Image != testImages().Workspace {
+		t.Fatalf("workspace container image = %q, want %q", workspaceContainer.Image, testImages().Workspace)
 	}
 	assertStringSliceEqual(t, "workspace command", workspaceContainer.Command, []string{"/bin/sh", "-lc"})
 	assertStringSliceEqual(t, "workspace args", workspaceContainer.Args, []string{"exec tail -f /dev/null"})
@@ -126,8 +137,8 @@ func assertBaselinePod(t *testing.T, pod *corev1.Pod, spec agent.RuntimeSpec) {
 	if runtimeContainer.Name != spec.ContainerName() {
 		t.Fatalf("runtime container name = %q, want %q", runtimeContainer.Name, spec.ContainerName())
 	}
-	if runtimeContainer.Image != DefaultImages().Toolbox {
-		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, DefaultImages().Toolbox)
+	if runtimeContainer.Image != testImages().Toolbox {
+		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, testImages().Toolbox)
 	}
 	assertStringSliceEqual(t, "runtime command", runtimeContainer.Command, spec.ToolboxBootstrapCommand())
 	assertStringSliceEqual(t, "runtime args", runtimeContainer.Args, spec.ToolboxBootstrapArgs())

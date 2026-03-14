@@ -11,14 +11,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/pejas/kagen/internal/agent"
-	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/config"
 	"github.com/pejas/kagen/internal/diagnostics"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/preflight"
 	"github.com/pejas/kagen/internal/session"
 	"github.com/pejas/kagen/internal/ui"
-	"github.com/pejas/kagen/internal/workload"
 )
 
 const (
@@ -141,13 +139,12 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string, options S
 	if err != nil {
 		return err
 	}
-	images := workload.DefaultImages()
 	trace.AddMetadataMap(map[string]string{
 		"agent_type":      string(agentType),
 		"agent_container": agentContainerName(agentType),
-		"workspace_image": images.Workspace,
-		"toolbox_image":   images.Toolbox,
-		"proxy_image":     cluster.ProxyImageRef(),
+		"workspace_image": cfg.Images.Workspace,
+		"toolbox_image":   cfg.Images.Toolbox,
+		"proxy_image":     cfg.Images.Proxy,
 	})
 	w.deps.ShowSelectedAgent(cfg, agentType)
 
@@ -207,8 +204,8 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string, options S
 	}
 	if err := trace.RunStep(stepEnsureResources, func(step *diagnostics.StepContext) error {
 		step.AddMetadataMap(map[string]string{
-			"workspace_image": images.Workspace,
-			"toolbox_image":   images.Toolbox,
+			"workspace_image": cfg.Images.Workspace,
+			"toolbox_image":   cfg.Images.Toolbox,
 		})
 		return w.deps.EnsureResources(ctx, kubeCtx, repo, cfg, agentType)
 	}); err != nil {
@@ -352,9 +349,9 @@ func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionI
 		"repo_path":       summary.Session.RepoPath,
 		"session_id":      strconv.FormatInt(summary.Session.ID, 10),
 		"session_uid":     summary.Session.UID,
-		"workspace_image": workload.DefaultImages().Workspace,
-		"toolbox_image":   workload.DefaultImages().Toolbox,
-		"proxy_image":     cluster.ProxyImageRef(),
+		"workspace_image": cfg.Images.Workspace,
+		"toolbox_image":   cfg.Images.Toolbox,
+		"proxy_image":     cfg.Images.Proxy,
 	})
 	ui.Verbose("Resolved attach target session id=%d uid=%s", summary.Session.ID, summary.Session.UID)
 

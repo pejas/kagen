@@ -147,7 +147,7 @@ func TestDetachedStartFailureMarksPersistedSessionFailed(t *testing.T) {
 	h := newReadinessHarness(t, "feature/e2e-failure")
 
 	started := h.startAsync([]string{"start", "--detach", "codex"}, map[string]string{
-		"KAGEN_PROXY_IMAGE": "busybox:latest",
+		"KAGEN_IMAGES_PROXY": "busybox:latest",
 	})
 	starting := h.waitForSessionStatus(workflowStatusStarting, 30*time.Second)
 	result := started.wait(t, 4*time.Minute)

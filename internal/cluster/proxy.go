@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -26,15 +25,13 @@ const (
 	proxyServiceName    = "egress-proxy"
 	proxyPolicyName     = "egress-proxy-egress"
 	proxyConfigMapName  = "egress-proxy-config"
-	defaultProxyImage   = "ghcr.io/pejas/kagen-proxy:2026-03-12"
 	proxyPort           = 8888
 	proxyConfigDir      = "/etc/kagen-proxy"
 	proxyConfigChecksum = "kagen.io/proxy-config-sha256"
-	proxyImageEnvVar    = "KAGEN_PROXY_IMAGE"
 )
 
 // EnsureProxy reconciles the repo-scoped proxy workload, service, and egress policy.
-func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy) error {
+func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, policy *proxy.Policy, imageRef string) error {
 	nsName := fmt.Sprintf("kagen-%s", repo.ID())
 	if policy == nil || len(policy.AllowedDestinations) == 0 {
 		ui.Verbose("Deleting proxy resources in %s because no allowlist is configured", nsName)
@@ -49,7 +46,7 @@ func (k *KubeManager) EnsureProxy(ctx context.Context, repo *git.Repository, pol
 	if err := k.ensureProxyService(ctx, nsName, repo.ID()); err != nil {
 		return err
 	}
-	if err := k.ensureProxyDeployment(ctx, nsName, repo.ID(), checksum); err != nil {
+	if err := k.ensureProxyDeployment(ctx, nsName, repo.ID(), checksum, imageRef); err != nil {
 		return err
 	}
 	if err := k.waitForProxyReady(ctx, nsName); err != nil {
@@ -175,7 +172,7 @@ func proxyAllowlist(destinations []string) string {
 	return strings.Join(patterns, "\n")
 }
 
-func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repoID, checksum string) error {
+func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repoID, checksum, imageRef string) error {
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      proxyDeploymentName,
@@ -204,7 +201,7 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
-						proxyContainer(),
+						proxyContainer(imageRef),
 					},
 					Volumes: []corev1.Volume{
 						{
@@ -247,10 +244,10 @@ func (k *KubeManager) ensureProxyDeployment(ctx context.Context, namespace, repo
 	return nil
 }
 
-func proxyContainer() corev1.Container {
+func proxyContainer(imageRef string) corev1.Container {
 	return corev1.Container{
 		Name:    "proxy",
-		Image:   ProxyImageRef(),
+		Image:   imageRef,
 		Command: []string{"/bin/sh", "-lc"},
 		Args:    []string{"exec tinyproxy -d -c " + proxyConfigDir + `/tinyproxy.conf`},
 		Ports: []corev1.ContainerPort{
@@ -274,15 +271,6 @@ func proxyContainer() corev1.Container {
 			},
 		},
 	}
-}
-
-// ProxyImageRef returns the pinned proxy image reference used on the runtime path.
-func ProxyImageRef() string {
-	if value := os.Getenv(proxyImageEnvVar); value != "" {
-		return value
-	}
-
-	return defaultProxyImage
 }
 
 func (k *KubeManager) ensureProxyService(ctx context.Context, namespace, repoID string) error {

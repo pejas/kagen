@@ -95,11 +95,13 @@ For local development, you can override which images are used without code chang
 
 | Environment Variable | Default | Purpose |
 |---------------------|---------|---------|
-| `KAGEN_WORKSPACE_IMAGE` | `ghcr.io/pejas/kagen-workspace:latest` | Workspace container image |
-| `KAGEN_TOOLBOX_IMAGE` | `ghcr.io/pejas/kagen-toolbox:latest` | Toolbox container image |
-| `KAGEN_PROXY_IMAGE` | `ghcr.io/pejas/kagen-proxy:latest` | Proxy container image |
+| `KAGEN_IMAGES_WORKSPACE` | resolved from kagen config | Workspace container image |
+| `KAGEN_IMAGES_TOOLBOX` | resolved from kagen config | Toolbox container image |
+| `KAGEN_IMAGES_PROXY` | resolved from kagen config | Proxy container image |
 
-These are read by `internal/workload` and `internal/cluster` at runtime.
+These map to `images.workspace`, `images.toolbox`, and `images.proxy` in the
+kagen config stack. Publishing a new image tag does not change runtime
+behaviour until config points at the new refs.
 
 ## Production Recommendations
 

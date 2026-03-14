@@ -13,9 +13,10 @@ import (
 )
 
 func TestValidateConfigurationClassifiesInvalidImageReference(t *testing.T) {
-	t.Setenv("KAGEN_WORKSPACE_IMAGE", "bad image")
+	cfg := config.DefaultConfig()
+	cfg.Images.Workspace = "bad image"
 
-	report, err := ValidateConfiguration(config.DefaultConfig(), agent.Codex)
+	report, err := ValidateConfiguration(cfg, agent.Codex)
 	if err == nil {
 		t.Fatal("ValidateConfiguration() error = nil, want image validation failure")
 	}

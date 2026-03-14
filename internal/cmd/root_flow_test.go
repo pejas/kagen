@@ -11,7 +11,6 @@ import (
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/ui"
-	"github.com/pejas/kagen/internal/workload"
 )
 
 func TestLoadRunConfigHonoursVerboseFlag(t *testing.T) {
@@ -67,8 +66,8 @@ func TestBuildRuntimePodUsesInternalWorkloadBuilderWithoutDevfile(t *testing.T) 
 	if pod.Spec.Containers[1].Name != "kagen-agent-codex" {
 		t.Fatalf("runtime container name = %q, want %q", pod.Spec.Containers[1].Name, "kagen-agent-codex")
 	}
-	if got := pod.Spec.Containers[1].Image; got != workload.DefaultImages().Toolbox {
-		t.Fatalf("runtime container image = %q, want %q", got, workload.DefaultImages().Toolbox)
+	if got := pod.Spec.Containers[1].Image; got != config.DefaultConfig().Images.Toolbox {
+		t.Fatalf("runtime container image = %q, want %q", got, config.DefaultConfig().Images.Toolbox)
 	}
 	if got := pod.Spec.Containers[1].Args; len(got) != 1 || got[0] != "exec tail -f /dev/null" {
 		t.Fatalf("runtime container args = %q, want install-free keepalive", got)
@@ -104,14 +103,14 @@ components:
 		t.Fatalf("buildRuntimePod() returned error: %v", err)
 	}
 
-	if pod.Spec.Containers[0].Image != workload.DefaultImages().Workspace {
-		t.Fatalf("workspace image = %q, want generated default %q", pod.Spec.Containers[0].Image, workload.DefaultImages().Workspace)
+	if pod.Spec.Containers[0].Image != config.DefaultConfig().Images.Workspace {
+		t.Fatalf("workspace image = %q, want generated default %q", pod.Spec.Containers[0].Image, config.DefaultConfig().Images.Workspace)
 	}
 	if pod.Spec.Containers[1].Name != "kagen-agent-codex" {
 		t.Fatalf("runtime container name = %q, want %q", pod.Spec.Containers[1].Name, "kagen-agent-codex")
 	}
-	if got := pod.Spec.Containers[1].Image; got != workload.DefaultImages().Toolbox {
-		t.Fatalf("runtime container image = %q, want generated toolbox %q", got, workload.DefaultImages().Toolbox)
+	if got := pod.Spec.Containers[1].Image; got != config.DefaultConfig().Images.Toolbox {
+		t.Fatalf("runtime container image = %q, want generated toolbox %q", got, config.DefaultConfig().Images.Toolbox)
 	}
 }
 

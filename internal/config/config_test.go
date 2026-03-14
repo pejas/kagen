@@ -22,6 +22,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Verbose {
 		t.Error("expected default Verbose=false")
 	}
+	if cfg.Images.Workspace == "" || cfg.Images.Toolbox == "" || cfg.Images.Proxy == "" {
+		t.Fatalf("expected default images to be populated, got %#v", cfg.Images)
+	}
 }
 
 func TestLoadWithEnvOverrides(t *testing.T) {
@@ -30,6 +33,7 @@ func TestLoadWithEnvOverrides(t *testing.T) {
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("KAGEN_AGENT", "claude")
 	t.Setenv("KAGEN_VERBOSE", "true")
+	t.Setenv("KAGEN_IMAGES_WORKSPACE", "ghcr.io/example/workspace:1.2.3")
 
 	cfg, err := Load()
 	if err != nil {
@@ -42,6 +46,9 @@ func TestLoadWithEnvOverrides(t *testing.T) {
 	if !cfg.Verbose {
 		t.Error("expected Verbose=true from env")
 	}
+	if cfg.Images.Workspace != "ghcr.io/example/workspace:1.2.3" {
+		t.Errorf("expected Images.Workspace from env, got %q", cfg.Images.Workspace)
+	}
 }
 
 func TestLoadFromConfigFile(t *testing.T) {
@@ -52,7 +59,7 @@ func TestLoadFromConfigFile(t *testing.T) {
 		t.Fatalf("failed to create config dir: %v", err)
 	}
 
-	configContent := []byte("agent: opencode\nforgejo_http_port: 4000\nagent_providers:\n  opencode:\n    - anthropic\n")
+	configContent := []byte("agent: opencode\nforgejo_http_port: 4000\nagent_providers:\n  opencode:\n    - anthropic\nimages:\n  toolbox: ghcr.io/example/toolbox:4.0.0\n")
 	if err := os.WriteFile(filepath.Join(configDir, "main.yml"), configContent, 0o644); err != nil {
 		t.Fatalf("failed to write config file: %v", err)
 	}
@@ -72,6 +79,9 @@ func TestLoadFromConfigFile(t *testing.T) {
 	}
 	if got := cfg.ProvidersForAgent("opencode"); len(got) != 1 || got[0] != "anthropic" {
 		t.Errorf("ProvidersForAgent(opencode) = %v, want [anthropic]", got)
+	}
+	if cfg.Images.Toolbox != "ghcr.io/example/toolbox:4.0.0" {
+		t.Errorf("expected Images.Toolbox from file, got %q", cfg.Images.Toolbox)
 	}
 }
 
@@ -102,11 +112,12 @@ func TestLoadHierarchy(t *testing.T) {
 		t.Fatalf("Chdir(%q) returned error: %v", projectDir, err)
 	}
 
-	if err := os.WriteFile(".kagen.yaml", []byte("agent: claude\n"), 0o644); err != nil {
+	if err := os.WriteFile(".kagen.yaml", []byte("agent: claude\nimages:\n  proxy: ghcr.io/example/proxy:9.9.9\n"), 0o644); err != nil {
 		t.Fatalf("failed to write project config: %v", err)
 	}
 
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("KAGEN_IMAGES_TOOLBOX", "ghcr.io/example/toolbox:8.8.8")
 
 	cfg, err := Load()
 	if err != nil {
@@ -118,6 +129,12 @@ func TestLoadHierarchy(t *testing.T) {
 	}
 	if !cfg.Verbose {
 		t.Error("expected Verbose=true (inherited from global)")
+	}
+	if cfg.Images.Proxy != "ghcr.io/example/proxy:9.9.9" {
+		t.Errorf("expected Images.Proxy from project config, got %q", cfg.Images.Proxy)
+	}
+	if cfg.Images.Toolbox != "ghcr.io/example/toolbox:8.8.8" {
+		t.Errorf("expected Images.Toolbox from env override, got %q", cfg.Images.Toolbox)
 	}
 }
 
@@ -151,5 +168,16 @@ func TestValidateRejectsProxyAllowlistURLs(t *testing.T) {
 
 	if err := Validate(cfg); err == nil {
 		t.Fatal("Validate() expected error for proxy allowlist URL")
+	}
+}
+
+func TestValidateRejectsInvalidImageRef(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.Images.Proxy = "bad image"
+
+	if err := Validate(cfg); err == nil {
+		t.Fatal("Validate() expected error for invalid image ref")
 	}
 }

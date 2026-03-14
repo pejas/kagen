@@ -3,7 +3,6 @@ package workload
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/pejas/kagen/internal/agent"
 	corev1 "k8s.io/api/core/v1"
@@ -11,13 +10,9 @@ import (
 )
 
 const (
-	defaultWorkspaceImage = "ghcr.io/pejas/kagen-workspace:2026-03-12"
-	defaultToolboxImage   = "ghcr.io/pejas/kagen-toolbox:2026-03-12"
 	defaultWorkspaceName  = "workspace"
 	defaultAgentHomeName  = "agent-home"
 	defaultWorkspaceMount = "/projects"
-	workspaceImageEnvVar  = "KAGEN_WORKSPACE_IMAGE"
-	toolboxImageEnvVar    = "KAGEN_TOOLBOX_IMAGE"
 )
 
 // Images describes the pinned baseline images for the generated pod.
@@ -54,7 +49,14 @@ func (b *Builder) BuildPod(req Request) (*corev1.Pod, error) {
 		return nil, fmt.Errorf("runtime type is required")
 	}
 
-	images := req.Images.withDefaults()
+	if req.Images.Workspace == "" {
+		return nil, fmt.Errorf("workspace image is required")
+	}
+	if req.Images.Toolbox == "" {
+		return nil, fmt.Errorf("toolbox image is required")
+	}
+
+	images := req.Images
 	pod := &corev1.Pod{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",
@@ -77,14 +79,6 @@ func (b *Builder) BuildPod(req Request) (*corev1.Pod, error) {
 	}
 
 	return pod, nil
-}
-
-// DefaultImages returns the baseline images used by the workload builder.
-func DefaultImages() Images {
-	return Images{
-		Workspace: imageRefOrDefault(workspaceImageEnvVar, defaultWorkspaceImage),
-		Toolbox:   imageRefOrDefault(toolboxImageEnvVar, defaultToolboxImage),
-	}
 }
 
 func workspaceContainer(images Images) corev1.Container {
@@ -123,18 +117,6 @@ func runtimeContainer(spec agent.RuntimeSpec, images Images) corev1.Container {
 	}
 }
 
-func (i Images) withDefaults() Images {
-	defaults := DefaultImages()
-	if i.Workspace == "" {
-		i.Workspace = defaults.Workspace
-	}
-	if i.Toolbox == "" {
-		i.Toolbox = defaults.Toolbox
-	}
-
-	return i
-}
-
 func baselineVolumes(workloadName string) []corev1.Volume {
 	return []corev1.Volume{
 		{
@@ -166,12 +148,4 @@ func requiredEnv(input []agent.EnvVar) []corev1.EnvVar {
 	}
 
 	return env
-}
-
-func imageRefOrDefault(envVar, fallback string) string {
-	if value := os.Getenv(envVar); value != "" {
-		return value
-	}
-
-	return fallback
 }

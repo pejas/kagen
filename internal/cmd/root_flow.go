@@ -142,7 +142,7 @@ func ensureProxy(
 	}
 
 	policy := proxy.LoadPolicy(cfg, string(agentType))
-	if err := manager.EnsureProxy(ctx, repo, policy); err != nil {
+	if err := manager.EnsureProxy(ctx, repo, policy, cfg.Images.Proxy); err != nil {
 		return fmt.Errorf("ensuring proxy: %w", err)
 	}
 	if len(policy.AllowedDestinations) == 0 {
@@ -290,7 +290,7 @@ func attachAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agen
 	return nil
 }
 
-func buildRuntimePod(repo *git.Repository, _ *config.Config, agentType agent.Type) (*corev1.Pod, error) {
+func buildRuntimePod(repo *git.Repository, cfg *config.Config, agentType agent.Type) (*corev1.Pod, error) {
 	namespace := fmt.Sprintf("kagen-%s", repo.ID())
 
 	spec, err := agent.SpecFor(agentType)
@@ -303,7 +303,10 @@ func buildRuntimePod(repo *git.Repository, _ *config.Config, agentType agent.Typ
 		Name:      runtimePodName,
 		Namespace: namespace,
 		Runtime:   spec,
-		Images:    workload.DefaultImages(),
+		Images: workload.Images{
+			Workspace: cfg.Images.Workspace,
+			Toolbox:   cfg.Images.Toolbox,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("building workload pod: %w", err)

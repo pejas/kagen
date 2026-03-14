@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/pejas/kagen/internal/agent"
-	"github.com/pejas/kagen/internal/cluster"
 	"github.com/pejas/kagen/internal/config"
 	kagerr "github.com/pejas/kagen/internal/errors"
 	"github.com/pejas/kagen/internal/git"
@@ -117,7 +116,10 @@ func ValidateConfiguration(cfg *config.Config, agentType agent.Type) (Report, er
 		},
 	}
 
-	images := workload.DefaultImages()
+	images := workload.Images{
+		Workspace: cfg.Images.Workspace,
+		Toolbox:   cfg.Images.Toolbox,
+	}
 	if failed := validateImageRef(CheckWorkspaceImage, images.Workspace); failed != nil {
 		report.Checks = append(report.Checks, *failed)
 		return report, kagerr.WithFailureClass(
@@ -152,7 +154,7 @@ func ValidateConfiguration(cfg *config.Config, agentType agent.Type) (Report, er
 		},
 	})
 
-	proxyRef := cluster.ProxyImageRef()
+	proxyRef := cfg.Images.Proxy
 	if failed := validateImageRef(CheckProxyImage, proxyRef); failed != nil {
 		report.Checks = append(report.Checks, *failed)
 		return report, kagerr.WithFailureClass(
