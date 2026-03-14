@@ -32,6 +32,72 @@ launch.
 - Local validation can override the default refs with `KAGEN_WORKSPACE_IMAGE`, `KAGEN_TOOLBOX_IMAGE`, and `KAGEN_PROXY_IMAGE`.
 - Runtime preflight validates only launch-critical shape and resolution. It does not repair bad image refs, publish artefacts, or replace runtime-backed verification.
 
+## Publish Workflow
+
+`.github/workflows/docker-publish.yml` publishes four multi-architecture images:
+
+- `ghcr.io/pejas/kagen-base`
+- `ghcr.io/pejas/kagen-workspace`
+- `ghcr.io/pejas/kagen-toolbox`
+- `ghcr.io/pejas/kagen-proxy`
+
+The workflow runs on Git tag pushes matching `v*` and on manual dispatch.
+
+For a tag push such as `v1.2.3`, `docker/metadata-action` emits these tags for
+each image:
+
+- `1.2.3`
+- `1.2`
+- `1`
+- the short Git commit SHA
+- `latest`
+
+The base image is built first. The workspace, toolbox, and proxy images are
+then built from `packaging/runtime-images/` and receive
+`KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ github.ref_name }}` as a build
+argument. On a version-tag push, `github.ref_name` is the pushed tag, so the
+dependent images consume the matching base-image tag.
+
+Manual dispatch is not equivalent to a version-tag push. The workflow allows a
+manual `inputs.tag`, but the dependent-image build still resolves
+`KAGEN_BASE_IMAGE` from `github.ref_name`, and the verification step also checks
+`${GITHUB_REF_NAME}`. In practice, manual dispatch is reliable only when the
+selected ref name already matches a published base-image tag. The release path
+for coherent versioned artefacts is a pushed Git tag such as `v2026-03-14` or
+`v1.2.3`.
+
+## How Kagen Selects Runtime Images
+
+The publish workflow does not change the images used by `kagen start` on its
+own. Kagen resolves runtime images from code-level defaults first, then applies
+environment-variable overrides:
+
+- Workspace and toolbox defaults are pinned in `internal/workload/builder.go`.
+- The proxy default is pinned in `internal/cluster/proxy.go`.
+- One-off overrides come from `KAGEN_WORKSPACE_IMAGE`,
+  `KAGEN_TOOLBOX_IMAGE`, and `KAGEN_PROXY_IMAGE`.
+
+`.kagen.yaml` does not define image references. `kagen config write` does not
+persist them.
+
+Use overrides for local validation or temporary testing:
+
+```bash
+export KAGEN_WORKSPACE_IMAGE=ghcr.io/pejas/kagen-workspace:1.2.3
+export KAGEN_TOOLBOX_IMAGE=ghcr.io/pejas/kagen-toolbox:1.2.3
+export KAGEN_PROXY_IMAGE=ghcr.io/pejas/kagen-proxy:1.2.3
+kagen start codex
+```
+
+To change the default image version used by kagen for every run, publish the
+replacement images first, then update the pinned refs in:
+
+- `internal/workload/builder.go`
+- `internal/cluster/proxy.go`
+
+That change is the runtime release point. Publishing a new image tag in GHCR is
+not sufficient until the pinned refs or the environment overrides point to it.
+
 ## Update Procedure
 
 1. Edit `packaging/runtime-images/toolbox/mise.toml` when the default toolchain changes.

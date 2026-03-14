@@ -61,7 +61,7 @@ Welcome, Agent. This document provides the essential context and actionable inst
 - [ ] Reuse shared port-forward/exec adapters; do not introduce new direct shell-outs to `kubectl`.
 
 ## Documentation Map
-- [INTERNALS-BLUEPRINT.md](file:///Users/pejas/Projects/kagen/docs/INTERNALS-BLUEPRINT.md): Quick command-flow mental model with ASCII diagrams.
-- [ARCHITECTURE.md](file:///Users/pejas/Projects/kagen/docs/ARCHITECTURE.md): Deep dive into the system design.
-- [CONVENTIONS.md](file:///Users/pejas/Projects/kagen/docs/CONVENTIONS.md): Detailed Go coding standards.
-- [README.md](file:///Users/pejas/Projects/kagen/README.md): Human-focused overview and installation.
+- [INTERNALS-BLUEPRINT.md](./kagen/docs/INTERNALS-BLUEPRINT.md): Quick command-flow mental model with ASCII diagrams.
+- [ARCHITECTURE.md](file:./kagen/docs/ARCHITECTURE.md): Deep dive into the system design.
+- [CONVENTIONS.md](file:./kagen/docs/CONVENTIONS.md): Detailed Go coding standards.
+- [README.md](file:./kagen/README.md): Human-focused overview and installation.
