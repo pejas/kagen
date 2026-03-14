@@ -220,7 +220,7 @@ func (f *ForgejoService) waitForAPI(ctx context.Context, port int) error {
 			}
 			resp, err := f.httpClient.Do(req)
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 				if resp.StatusCode == http.StatusOK {
 					ui.Verbose("Forgejo API responded on local port %d after %d attempt(s)", port, i+1)
 					return nil

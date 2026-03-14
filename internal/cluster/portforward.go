@@ -309,7 +309,9 @@ func waitForPort(port int, timeout time.Duration) error {
 	for time.Now().Before(deadline) {
 		conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 100*time.Millisecond)
 		if err == nil {
-			conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				return fmt.Errorf("closing readiness probe connection: %w", closeErr)
+			}
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)

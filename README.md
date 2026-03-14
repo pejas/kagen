@@ -147,7 +147,7 @@ make test-e2e
 Local tooling expected by the checked-in workflow:
 
 - Go matching `go.mod`
-- `golangci-lint` v1.64.8 or newer
+- `golangci-lint` matching [`.golangci-lint-version`](/Users/pejas/Projects/kagen/.golangci-lint-version)
 - `kubectl`
 - `colima` for runtime-backed manual or E2E validation
 

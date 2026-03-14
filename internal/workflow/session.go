@@ -98,7 +98,7 @@ func NewStartWorkflow(deps SessionDependencies) *StartWorkflow {
 	return &StartWorkflow{deps: deps}
 }
 
-func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string, options StartOptions) error {
+func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string, options StartOptions) (err error) {
 	ctx = contextOrBackground(ctx)
 	trace := diagnostics.NewRecorder("start", startTraceSteps(options), w.deps.Now, w.deps.DiagnosticsReporter)
 	defer trace.Complete()
@@ -170,7 +170,11 @@ func (w *StartWorkflow) Run(ctx context.Context, explicitAgent string, options S
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("closing session store: %w", closeErr)
+		}
+	}()
 
 	persisted, err := createPersistedKagenSession(ctx, store, repo, w.deps.Now)
 	if err != nil {
@@ -307,7 +311,7 @@ func NewAttachWorkflow(deps SessionDependencies) *AttachWorkflow {
 	return &AttachWorkflow{deps: deps}
 }
 
-func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionID int64, sessionSelected bool) error {
+func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionID int64, sessionSelected bool) (err error) {
 	ctx = contextOrBackground(ctx)
 	trace := diagnostics.NewRecorder("attach", attachTraceSteps(), w.deps.Now, w.deps.DiagnosticsReporter)
 	defer trace.Complete()
@@ -326,7 +330,11 @@ func (w *AttachWorkflow) Run(ctx context.Context, explicitAgent string, sessionI
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("closing session store: %w", closeErr)
+		}
+	}()
 
 	summary, err := resolveAttachSummary(ctx, store, w.deps.DiscoverRepository, sessionID, sessionSelected, agentType)
 	if err != nil {

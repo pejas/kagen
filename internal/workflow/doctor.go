@@ -45,7 +45,7 @@ func NewDoctorWorkflow(deps DoctorDependencies) *DoctorWorkflow {
 	return &DoctorWorkflow{deps: deps}
 }
 
-func (w *DoctorWorkflow) Run(ctx context.Context, sessionID int64, sessionSelected bool) error {
+func (w *DoctorWorkflow) Run(ctx context.Context, sessionID int64, sessionSelected bool) (err error) {
 	ctx = contextOrBackground(ctx)
 
 	cfg, err := w.deps.LoadConfig()
@@ -57,7 +57,11 @@ func (w *DoctorWorkflow) Run(ctx context.Context, sessionID int64, sessionSelect
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("closing session store: %w", closeErr)
+		}
+	}()
 
 	summary, err := resolveDoctorSummary(ctx, store, w.deps.DiscoverRepository, sessionID, sessionSelected)
 	if err != nil {
