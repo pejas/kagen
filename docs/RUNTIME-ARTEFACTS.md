@@ -43,6 +43,12 @@ launch.
 
 The workflow runs on Git tag pushes matching `v*` and on manual dispatch.
 
+The workflow first resolves a canonical image tag:
+
+- `inputs.tag` on manual dispatch, when supplied
+- otherwise the pushed Git tag with the leading `v` removed
+- otherwise the short Git commit SHA
+
 For a tag push such as `v1.2.3`, `docker/metadata-action` emits these tags for
 each image:
 
@@ -54,17 +60,13 @@ each image:
 
 The base image is built first. The workspace, toolbox, and proxy images are
 then built from `packaging/runtime-images/` and receive
-`KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ github.ref_name }}` as a build
-argument. On a version-tag push, `github.ref_name` is the pushed tag, so the
-dependent images consume the matching base-image tag.
+`KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:<resolved-tag>` as a build
+argument. The verification step checks the same resolved tag, so the workflow
+uses one consistent base-image reference across publication and validation.
 
-Manual dispatch is not equivalent to a version-tag push. The workflow allows a
-manual `inputs.tag`, but the dependent-image build still resolves
-`KAGEN_BASE_IMAGE` from `github.ref_name`, and the verification step also checks
-`${GITHUB_REF_NAME}`. In practice, manual dispatch is reliable only when the
-selected ref name already matches a published base-image tag. The release path
-for coherent versioned artefacts is a pushed Git tag such as `v2026-03-14` or
-`v1.2.3`.
+That means a release tag such as `v1.2.3` publishes runtime images tagged
+`1.2.3`, while manual dispatch can target any explicit image tag through
+`inputs.tag`.
 
 ## How Kagen Selects Runtime Images
 

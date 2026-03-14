@@ -22,6 +22,8 @@ env:
 jobs:
   build-and-push-base:
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.resolve-tag.outputs.image_tag }}
     permissions:
       contents: read
       packages: write
@@ -48,6 +50,20 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: resolve-tag
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            image_tag="${{ inputs.tag }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            image_tag="${GITHUB_REF_NAME#v}"
+          else
+            image_tag="$(git rev-parse --short HEAD)"
+          fi
+
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Extract metadata
         id: meta
@@ -88,7 +104,7 @@ jobs:
           timeout_minutes: 10
           max_attempts: 30
           retry_wait_seconds: 30
-          command: docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ github.ref_name }}"
+          command: docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ steps.resolve-tag.outputs.image_tag }}"
 
   build-and-push-dependents:
     needs: build-and-push-base
@@ -157,7 +173,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ github.ref_name }}
+            KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ needs.build-and-push-base.outputs.image_tag }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
 
@@ -188,7 +204,7 @@ jobs:
 
       - name: Verify images exist
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          VERSION="${{ needs.build-and-push-base.outputs.image_tag }}"
           for image in base workspace toolbox proxy; do
             echo "Verifying ghcr.io/pejas/kagen-${image}:${VERSION}..."
             docker manifest inspect "ghcr.io/pejas/kagen-${image}:${VERSION}" > /dev/null
