@@ -43,7 +43,7 @@ git push origin v1.2.3
 
 This triggers the Docker Publish workflow which:
 1. Builds all images for `linux/amd64` and `linux/arm64`
-2. Tags images with: `v1.2.3`, `1.2`, `1`, `latest`, and commit SHA
+2. Tags images with: `1.2.3`, `1.2`, `1`, `latest`, and commit SHA
 3. Pushes images to `ghcr.io/pejas/kagen-*`
 4. Generates artifact attestations for provenance
 

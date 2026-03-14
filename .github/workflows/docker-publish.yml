@@ -18,6 +18,8 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: pejas/kagen
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
 
 jobs:
   build-and-push-base:
@@ -77,6 +79,10 @@ jobs:
             type=sha,prefix=,suffix=,format=short
             type=raw,value=latest,enable=true
             type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=kagen-base
+            org.opencontainers.image.description=Base runtime image for kagen isolated development environments.
+            org.opencontainers.image.documentation=https://github.com/pejas/kagen/blob/main/packaging/runtime-images/README.md
 
       - name: Build and push base image
         id: push
@@ -88,6 +94,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -103,7 +110,7 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 30
-          retry_wait_seconds: 30
+          retry_wait_seconds: 5
           command: docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ steps.resolve-tag.outputs.image_tag }}"
 
   build-and-push-dependents:
@@ -121,12 +128,15 @@ jobs:
           - name: workspace
             dockerfile: ./packaging/runtime-images/workspace/Dockerfile
             context: ./packaging/runtime-images
+            description: Workspace runtime image for kagen isolated development environments.
           - name: toolbox
             dockerfile: ./packaging/runtime-images/toolbox/Dockerfile
             context: ./packaging/runtime-images
+            description: Toolbox runtime image for kagen isolated development environments.
           - name: proxy
             dockerfile: ./packaging/runtime-images/proxy/Dockerfile
             context: ./packaging/runtime-images
+            description: Proxy runtime image for kagen isolated development environments.
 
     steps:
       - name: Checkout repository
@@ -161,6 +171,10 @@ jobs:
             type=sha,prefix=,suffix=,format=short
             type=raw,value=latest,enable=true
             type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=kagen-${{ matrix.image.name }}
+            org.opencontainers.image.description=${{ matrix.image.description }}
+            org.opencontainers.image.documentation=https://github.com/pejas/kagen/blob/main/packaging/runtime-images/README.md
 
       - name: Build and push image
         id: push
@@ -172,6 +186,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
             KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ needs.build-and-push-base.outputs.image_tag }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
