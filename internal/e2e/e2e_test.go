@@ -217,7 +217,9 @@ func InitializeScenario(ctx *godog.ScenarioContext) {
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
 		if c.tmpDir != "" {
 			_ = cleanupNamespace(namespaceForTmpDir(c.tmpDir))
-			os.RemoveAll(c.tmpDir)
+			if removeErr := os.RemoveAll(c.tmpDir); removeErr != nil && err == nil {
+				return ctx, removeErr
+			}
 		}
 		return ctx, nil
 	})

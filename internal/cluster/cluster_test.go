@@ -7,7 +7,6 @@ import (
 	"github.com/pejas/kagen/internal/agent"
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
-	"github.com/pejas/kagen/internal/workload"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -85,7 +84,7 @@ func TestTinyproxyConfigUsesDedicatedConfigDir(t *testing.T) {
 func TestProxyContainerUsesPinnedBootstrapImage(t *testing.T) {
 	t.Parallel()
 
-	container := proxyContainer()
+	container := proxyContainer("ghcr.io/example/proxy:1.2.3")
 
 	if strings.Contains(container.Image, ":latest") {
 		t.Fatalf("proxy container image should be pinned, got %q", container.Image)
@@ -105,6 +104,7 @@ func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
 	t.Parallel()
 
 	pod := &corev1.Pod{}
+	pod.Spec.Containers = []corev1.Container{{Name: "workspace", Image: "ghcr.io/example/workspace:1.2.3"}}
 	repo := &git.Repository{CurrentBranch: "main"}
 
 	injectWorkspaceSync(pod, repo)
@@ -138,8 +138,8 @@ func TestInjectWorkspaceSyncUsesKagenBranchAsRemoteBase(t *testing.T) {
 	if !strings.Contains(args[0], `git -c "http.extraHeader=Authorization: Basic ${auth_header}" clone "$repo_url" "$worktree"`) {
 		t.Fatalf("workspace sync script missing header-auth clone: %q", args[0])
 	}
-	if got := pod.Spec.InitContainers[0].Image; got != workload.DefaultImages().Workspace {
-		t.Fatalf("workspace sync image = %q, want generated workspace image %q", got, workload.DefaultImages().Workspace)
+	if got := pod.Spec.InitContainers[0].Image; got != "ghcr.io/example/workspace:1.2.3" {
+		t.Fatalf("workspace sync image = %q, want workspace container image", got)
 	}
 	if !strings.Contains(args[0], "mkdir -p /home/kagen") {
 		t.Fatalf("workspace sync script should prepare the agent home volume: %q", args[0])

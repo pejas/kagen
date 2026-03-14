@@ -147,7 +147,7 @@ func TestDetachedStartFailureMarksPersistedSessionFailed(t *testing.T) {
 	h := newReadinessHarness(t, "feature/e2e-failure")
 
 	started := h.startAsync([]string{"start", "--detach", "codex"}, map[string]string{
-		"KAGEN_PROXY_IMAGE": "busybox:latest",
+		"KAGEN_IMAGES_PROXY": "busybox:latest",
 	})
 	starting := h.waitForSessionStatus(workflowStatusStarting, 30*time.Second)
 	result := started.wait(t, 4*time.Minute)
@@ -308,7 +308,7 @@ func (h *readinessHarness) run(args []string, extraEnv map[string]string) comman
 func (h *readinessHarness) startAsync(args []string, extraEnv map[string]string) *asyncCommand {
 	h.t.Helper()
 
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 	cmd := h.command(ctx, args, extraEnv)
 
 	running := &asyncCommand{
@@ -319,10 +319,13 @@ func (h *readinessHarness) startAsync(args []string, extraEnv map[string]string)
 	cmd.Stderr = &running.output
 
 	if err := cmd.Start(); err != nil {
+		cancel()
 		h.t.Fatalf("starting %q: %v", strings.Join(args, " "), err)
 	}
 
 	go func() {
+		defer cancel()
+
 		err := cmd.Wait()
 		result := commandResult{
 			output: running.output.String(),
@@ -403,7 +406,11 @@ func (h *readinessHarness) repoSummaries() []session.Summary {
 	if err != nil {
 		h.t.Fatalf("opening session store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			h.t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summaries, err := store.List(context.Background(), session.ListOptions{RepoPath: h.repo.Path})
 	if err != nil {
@@ -420,7 +427,11 @@ func (h *readinessHarness) mustSummary(id int64) session.Summary {
 	if err != nil {
 		h.t.Fatalf("opening session store: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			h.t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summary, found, err := store.GetSummary(context.Background(), id)
 	if err != nil {

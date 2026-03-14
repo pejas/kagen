@@ -84,8 +84,8 @@ Before running the detached readiness suite locally:
 
 In environments where the pinned published runtime tags are not pullable from the cluster, run `make test-e2e` with the documented local-image overrides instead of changing runtime contracts:
 
-- `KAGEN_WORKSPACE_IMAGE=ghcr.io/pejas/kagen-workspace:local`
-- `KAGEN_TOOLBOX_IMAGE=ghcr.io/pejas/kagen-toolbox:local`
-- `KAGEN_PROXY_IMAGE=ghcr.io/pejas/kagen-proxy:local`
+- `KAGEN_IMAGES_WORKSPACE=ghcr.io/pejas/kagen-workspace:local`
+- `KAGEN_IMAGES_TOOLBOX=ghcr.io/pejas/kagen-toolbox:local`
+- `KAGEN_IMAGES_PROXY=ghcr.io/pejas/kagen-proxy:local`
 
 You usually do not need `make test-e2e` for isolated changes in config parsing, Git helper behaviour, session persistence, or command help text when those changes are already covered by `make test`.

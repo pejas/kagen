@@ -32,14 +32,18 @@ Without --all, only sessions for the current repository are shown.`,
 	return cmd
 }
 
-func runList(ctx context.Context, all bool) error {
+func runList(ctx context.Context, all bool) (err error) {
 	ctx = rootContext(ctx)
 
 	store, err := session.OpenDefault()
 	if err != nil {
 		return fmt.Errorf("opening session store: %w", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("closing session store: %w", closeErr)
+		}
+	}()
 
 	opts := session.ListOptions{}
 	if !all {

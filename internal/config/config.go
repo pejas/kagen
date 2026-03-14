@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -31,6 +32,9 @@ type Config struct {
 
 	// Runtime contains configuration for the Colima runtime.
 	Runtime RuntimeConfig `mapstructure:"runtime"`
+
+	// Images contains runtime image references for the generated workloads.
+	Images ImagesConfig `mapstructure:"images"`
 }
 
 // RuntimeConfig holds Colima-specific settings.
@@ -41,22 +45,38 @@ type RuntimeConfig struct {
 	StartupTimeout string `mapstructure:"startup_timeout"`
 }
 
+// ImagesConfig holds container image references used on the runtime path.
+type ImagesConfig struct {
+	Workspace string `mapstructure:"workspace"`
+	Toolbox   string `mapstructure:"toolbox"`
+	Proxy     string `mapstructure:"proxy"`
+}
+
+var defaultConfig = Config{
+	Agent:           "",
+	AgentProviders:  map[string][]string{},
+	ProxyAllowlist:  nil,
+	ForgejoHTTPPort: 3000,
+	ForgejoSSHPort:  2222,
+	Verbose:         false,
+	Runtime: RuntimeConfig{
+		CPU:            4,
+		Memory:         8,
+		Disk:           60,
+		StartupTimeout: "5m",
+	},
+	Images: ImagesConfig{
+		Workspace: "ghcr.io/pejas/kagen-workspace:0.1.4",
+		Toolbox:   "ghcr.io/pejas/kagen-toolbox:0.1.4",
+		Proxy:     "ghcr.io/pejas/kagen-proxy:0.1.4",
+	},
+}
+
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
-	return &Config{
-		Agent:           "",
-		AgentProviders:  map[string][]string{},
-		ProxyAllowlist:  nil,
-		ForgejoHTTPPort: 3000,
-		ForgejoSSHPort:  2222,
-		Verbose:         false,
-		Runtime: RuntimeConfig{
-			CPU:            4,
-			Memory:         8,
-			Disk:           60,
-			StartupTimeout: "5m",
-		},
-	}
+	cfg := defaultConfig
+	cfg.AgentProviders = map[string][]string{}
+	return &cfg
 }
 
 // ProvidersForAgent returns the configured providers for the given agent.
@@ -106,6 +126,7 @@ func Load() (*Config, error) {
 
 	// 4. Environment variable overrides
 	v.SetEnvPrefix("KAGEN")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	cfg := DefaultConfig()
@@ -120,16 +141,20 @@ func Load() (*Config, error) {
 }
 
 func setDefaults(v *viper.Viper) {
-	v.SetDefault("agent", "")
-	v.SetDefault("agent_providers", map[string][]string{})
+	cfg := DefaultConfig()
+	v.SetDefault("agent", cfg.Agent)
+	v.SetDefault("agent_providers", cfg.AgentProviders)
 	v.SetDefault("proxy_allowlist", []string{})
-	v.SetDefault("forgejo_http_port", 3000)
-	v.SetDefault("forgejo_ssh_port", 2222)
-	v.SetDefault("verbose", false)
-	v.SetDefault("runtime.cpu", 4)
-	v.SetDefault("runtime.memory", 8)
-	v.SetDefault("runtime.disk", 60)
-	v.SetDefault("runtime.startup_timeout", "5m")
+	v.SetDefault("forgejo_http_port", cfg.ForgejoHTTPPort)
+	v.SetDefault("forgejo_ssh_port", cfg.ForgejoSSHPort)
+	v.SetDefault("verbose", cfg.Verbose)
+	v.SetDefault("runtime.cpu", cfg.Runtime.CPU)
+	v.SetDefault("runtime.memory", cfg.Runtime.Memory)
+	v.SetDefault("runtime.disk", cfg.Runtime.Disk)
+	v.SetDefault("runtime.startup_timeout", cfg.Runtime.StartupTimeout)
+	v.SetDefault("images.workspace", cfg.Images.Workspace)
+	v.SetDefault("images.toolbox", cfg.Images.Toolbox)
+	v.SetDefault("images.proxy", cfg.Images.Proxy)
 }
 
 // configDirectory returns the path to the kagen config directory,

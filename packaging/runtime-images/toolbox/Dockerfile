@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 ARG KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:phase1
+# hadolint ignore=DL3006
 FROM ${KAGEN_BASE_IMAGE}
 
 USER root
@@ -14,6 +15,7 @@ ENV HOME=/home/kagen \
     MISE_SYSTEM_CONFIG_FILE=/etc/mise/config.toml \
     PATH=/opt/mise/shims:/opt/mise/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN case "${TARGETARCH}" in \
         amd64) mise_arch="x64" ;; \
         arm64) mise_arch="arm64" ;; \

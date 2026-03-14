@@ -50,12 +50,31 @@ func Validate(cfg *Config) error {
 		}
 	}
 
+	if err := validateImageRef("images.workspace", cfg.Images.Workspace); err != nil {
+		return err
+	}
+	if err := validateImageRef("images.toolbox", cfg.Images.Toolbox); err != nil {
+		return err
+	}
+	if err := validateImageRef("images.proxy", cfg.Images.Proxy); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func validatePort(name string, port int) error {
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("%s must be between 1 and 65535", name)
+	}
+
+	return nil
+}
+
+func validateImageRef(name, ref string) error {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" || strings.Contains(trimmed, "://") || strings.ContainsAny(trimmed, " \t\r\n") || strings.HasSuffix(trimmed, ":") || strings.HasSuffix(trimmed, "@") {
+		return fmt.Errorf("%s must be a valid image reference", name)
 	}
 
 	return nil

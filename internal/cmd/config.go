@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/pejas/kagen/internal/agent"
+	"github.com/pejas/kagen/internal/config"
 	"github.com/pejas/kagen/internal/ui"
 )
 
@@ -22,6 +23,10 @@ agent: %s
 # agent_providers:
 #   opencode:
 #     - anthropic
+# images:
+#   workspace: %s
+#   toolbox: %s
+#   proxy: %s
 # proxy_allowlist:
 #   - registry.npmjs.org
 #   - github.com
@@ -80,7 +85,14 @@ func runConfigWrite(_ *cobra.Command, _ []string) error {
 	}
 
 	configPath := filepath.Join(cwd, ".kagen.yaml")
-	configContent := fmt.Sprintf(defaultKagenConfigTemplate, agentType)
+	defaults := config.DefaultConfig()
+	configContent := fmt.Sprintf(
+		defaultKagenConfigTemplate,
+		agentType,
+		defaults.Images.Workspace,
+		defaults.Images.Toolbox,
+		defaults.Images.Proxy,
+	)
 	created, err := writeProjectFile(configPath, configContent, configWriteForceFlag)
 	if err != nil {
 		return err

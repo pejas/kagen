@@ -237,7 +237,11 @@ func captureStdout(t *testing.T, fn func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe() returned error: %v", err)
 	}
-	defer reader.Close()
+	defer func() {
+		if closeErr := reader.Close(); closeErr != nil {
+			t.Errorf("reader.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	os.Stdout = writer
 	defer func() {

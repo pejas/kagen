@@ -191,7 +191,9 @@ func (f *ForgejoService) createRepo(ctx context.Context, session *ReviewSession,
 	if err != nil {
 		return fmt.Errorf("creating forgejo repo: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusConflict {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)

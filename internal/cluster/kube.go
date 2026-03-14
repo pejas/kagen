@@ -11,7 +11,6 @@ import (
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/proxy"
 	"github.com/pejas/kagen/internal/ui"
-	"github.com/pejas/kagen/internal/workload"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -112,7 +111,7 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 func injectWorkspaceSync(pod *corev1.Pod, repo *git.Repository) {
 	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
 		Name:    "workspace-sync",
-		Image:   workload.DefaultImages().Workspace,
+		Image:   workspaceSyncImage(pod),
 		Command: []string{"/bin/sh", "-lc"},
 		Args: []string{fmt.Sprintf(`set -eu
 export GIT_TERMINAL_PROMPT=0
@@ -169,6 +168,19 @@ chown -R 1000:1000 /projects /home/kagen
 			},
 		},
 	})
+}
+
+func workspaceSyncImage(pod *corev1.Pod) string {
+	for _, container := range pod.Spec.Containers {
+		if container.Name == "workspace" && container.Image != "" {
+			return container.Image
+		}
+	}
+	if len(pod.Spec.Containers) > 0 {
+		return pod.Spec.Containers[0].Image
+	}
+
+	return ""
 }
 
 func injectAgentRuntime(pod *corev1.Pod, agentType, namespace string, policy *proxy.Policy) {

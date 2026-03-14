@@ -42,6 +42,21 @@ Rewrite the optional project config with a different default agent:
 kagen config write --agent codex --force
 ```
 
+Override runtime image refs through config or environment:
+
+```yaml
+images:
+  workspace: ghcr.io/pejas/kagen-workspace:0.1.4
+  toolbox: ghcr.io/pejas/kagen-toolbox:0.1.4
+  proxy: ghcr.io/pejas/kagen-proxy:0.1.4
+```
+
+```bash
+export KAGEN_IMAGES_WORKSPACE=ghcr.io/pejas/kagen-workspace:0.1.4
+export KAGEN_IMAGES_TOOLBOX=ghcr.io/pejas/kagen-toolbox:0.1.4
+export KAGEN_IMAGES_PROXY=ghcr.io/pejas/kagen-proxy:0.1.4
+```
+
 Start a new session:
 
 ```bash
@@ -147,11 +162,11 @@ make test-e2e
 Local tooling expected by the checked-in workflow:
 
 - Go matching `go.mod`
-- `golangci-lint` v1.64.8 or newer
+- `golangci-lint` matching [`.golangci-lint-version`](/Users/pejas/Projects/kagen/.golangci-lint-version)
 - `kubectl`
 - `colima` for runtime-backed manual or E2E validation
 
 `make test` intentionally excludes `internal/e2e` so the default validation loop stays fast and does not require the full local runtime stack. Use `make test-e2e` when you specifically want end-to-end coverage. The repository CI contract mirrors `make build`, `make test`, and `make lint`.
 
-Runtime artefacts are release-managed. See [docs/RUNTIME-ARTEFACTS.md](docs/RUNTIME-ARTEFACTS.md) for the current image set and update procedure.
+Runtime artefacts are release-managed. See [docs/RUNTIME-ARTEFACTS.md](/Users/pejas/Projects/kagen/docs/RUNTIME-ARTEFACTS.md) for the current image set and update procedure.
 The Phase 1 first-party image scaffold lives under `packaging/runtime-images/`, with the default toolbox toolchain declared in `packaging/runtime-images/toolbox/mise.toml` and frozen in `packaging/runtime-images/toolbox/mise.lock`.

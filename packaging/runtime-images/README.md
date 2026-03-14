@@ -1,40 +1,144 @@
-## Runtime Images
+# Kagen Runtime Images
 
-This directory contains the first-party runtime-image scaffold for Phase 1 of the
-Debian toolbox rollout.
+Multi-platform Docker images for the kagen isolated development environment runtime.
 
-Images:
+## Images
 
-- `base`: minimal Debian runtime with Linux primitives and native build dependencies
-- `workspace`: lightweight workspace and init image layered on `base`
-- `toolbox`: agent toolbox image layered on `base` and populated via checked-in `mise` config and lock data
-- `proxy`: dedicated tinyproxy image layered on `base`
+| Image | Purpose | Base | Size |
+|-------|---------|------|------|
+| `ghcr.io/pejas/kagen-base` | Base image with development tools | `debian:bookworm-slim` | ~300MB |
+| `ghcr.io/pejas/kagen-workspace` | Lightweight workspace container | `kagen-base` | ~300MB |
+| `ghcr.io/pejas/kagen-toolbox` | Full toolchain with mise-managed languages | `kagen-base` | ~2GB |
+| `ghcr.io/pejas/kagen-proxy` | Tinyproxy for network proxying | `kagen-base` | ~320MB |
 
-Current code paths resolve image references from:
+*Sizes are approximate uncompressed. Compressed sizes in registry are typically 30-50% smaller.
 
-- `internal/workload` for workspace and toolbox images
-- `internal/cluster` for the proxy image
+## Supported Platforms
 
-Local image bring-up can override those refs without code changes:
+- `linux/amd64`
+- `linux/arm64`
 
-- `KAGEN_WORKSPACE_IMAGE`
-- `KAGEN_TOOLBOX_IMAGE`
-- `KAGEN_PROXY_IMAGE`
+## Usage
 
-Suggested local build order:
+### Local Development
 
-1. Build `base`
-2. Generate or refresh `toolbox/mise.lock`
-3. Build `workspace`
-4. Build `toolbox`
-5. Build `proxy`
+Build images locally for testing:
 
-For local runtime validation, `make runtime-images-build-local` builds:
+```bash
+# Build all images for local platform
+make runtime-images-build-local
 
-- `ghcr.io/pejas/kagen-base:local`
-- `ghcr.io/pejas/kagen-workspace:local`
-- `ghcr.io/pejas/kagen-toolbox:local`
-- `ghcr.io/pejas/kagen-proxy:local`
+# Build multi-platform images (requires Docker buildx)
+make runtime-images-build VERSION=local
+```
 
-The release flow should publish immutable first-party artefacts and replace the
-Phase 1 bootstrap tags in Go code and docs with digests.
+### CI/CD Publishing
+
+Images are automatically published to GHCR when a version tag is pushed:
+
+```bash
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+This triggers the Docker Publish workflow which:
+1. Builds all images for `linux/amd64` and `linux/arm64`
+2. Tags images with: `1.2.3`, `1.2`, `1`, `latest`, and commit SHA
+3. Pushes images to `ghcr.io/pejas/kagen-*`
+4. Generates artifact attestations for provenance
+
+### Manual Publishing
+
+Maintainers can trigger a manual publish via GitHub Actions:
+
+1. Go to Actions → Docker Publish
+2. Click "Run workflow"
+3. Optionally specify a custom tag
+
+## Image Details
+
+### kagen-base
+
+Base Debian Bookworm image with essential development tools:
+- Build tools (build-essential, cmake, ninja-build)
+- Version control (git)
+- System utilities (curl, wget, jq, yq)
+- Python build dependencies
+- Non-root user `kagen` (UID 1000)
+
+### kagen-workspace
+
+Minimal workspace container extending `kagen-base`:
+- Suitable for project-specific workspaces
+- Runs `tail -f /dev/null` to keep container alive
+
+### kagen-toolbox
+
+Full development toolbox with mise-managed languages:
+- Node.js 24, pnpm, Bun, Deno
+- Python 3.13, uv
+- Go 1.26
+- Java (Temurin 25), Maven, Gradle
+- Rust, cargo-binstall
+- CLI tools: ripgrep, fd, jq, yq, just
+- AI coding assistants: Codex, Claude Code, OpenCode
+
+### kagen-proxy
+
+Tinyproxy for network traffic management:
+- Tinyproxy configured for kagen
+- Runs as non-root user
+
+## Image Overrides
+
+For local development, you can override which images are used without code changes:
+
+| Environment Variable | Default | Purpose |
+|---------------------|---------|---------|
+| `KAGEN_IMAGES_WORKSPACE` | resolved from kagen config | Workspace container image |
+| `KAGEN_IMAGES_TOOLBOX` | resolved from kagen config | Toolbox container image |
+| `KAGEN_IMAGES_PROXY` | resolved from kagen config | Proxy container image |
+
+These map to `images.workspace`, `images.toolbox`, and `images.proxy` in the
+kagen config stack. Publishing a new image tag does not change runtime
+behaviour until config points at the new refs.
+
+## Production Recommendations
+
+For production stability, pin to specific image digests rather than tags:
+
+```bash
+# Instead of:
+ghcr.io/pejas/kagen-base:latest
+
+# Use:
+ghcr.io/pejas/kagen-base@sha256:abc123...
+```
+
+Digests provide immutable references that never change, ensuring reproducible deployments.
+
+## Makefile Targets
+
+| Target | Description |
+|--------|-------------|
+| `runtime-images-build-local` | Build single-platform images for local use |
+| `runtime-images-build` | Build multi-platform images locally |
+| `runtime-images-push` | Build and push multi-platform images to GHCR |
+| `runtime-images-lock` | Refresh mise.lock for toolbox dependencies (reproducible language versions) |
+
+## Registry Authentication
+
+To pull images from GHCR:
+
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USERNAME --password-stdin
+```
+
+Images are public and can be pulled without authentication.
+
+## Security
+
+- Images are built with Docker BuildKit for improved security
+- Artifact attestations are generated for provenance verification
+- All images run as non-root user (`kagen`)
+- Base image uses Debian Bookworm (stable) with security updates

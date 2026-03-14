@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -26,7 +26,52 @@ jobs:
         run: make test
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
+          version-file: .golangci-lint-version
           args: --config=.golangci.yml
+
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      BASE_IMAGE_TAG: kagen-base:ci
+      WORKSPACE_IMAGE_TAG: kagen-workspace:ci
+      TOOLBOX_IMAGE_TAG: kagen-toolbox:ci
+      PROXY_IMAGE_TAG: kagen-proxy:ci
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Validate Dockerfiles
+        run: |
+          for dockerfile in packaging/runtime-images/*/Dockerfile; do
+            echo "Validating ${dockerfile}..."
+            docker run --rm -i hadolint/hadolint:v2.12.0 < "${dockerfile}"
+          done
+
+      - name: Build runtime images (dry-run)
+        run: |
+          docker build \
+            --file ./packaging/runtime-images/base/Dockerfile \
+            --tag "${BASE_IMAGE_TAG}" \
+            ./packaging/runtime-images/base
+
+          docker build \
+            --file ./packaging/runtime-images/workspace/Dockerfile \
+            --tag "${WORKSPACE_IMAGE_TAG}" \
+            --build-arg "KAGEN_BASE_IMAGE=${BASE_IMAGE_TAG}" \
+            ./packaging/runtime-images
+
+          docker build \
+            --file ./packaging/runtime-images/toolbox/Dockerfile \
+            --tag "${TOOLBOX_IMAGE_TAG}" \
+            --build-arg "KAGEN_BASE_IMAGE=${BASE_IMAGE_TAG}" \
+            ./packaging/runtime-images
+
+          docker build \
+            --file ./packaging/runtime-images/proxy/Dockerfile \
+            --tag "${PROXY_IMAGE_TAG}" \
+            --build-arg "KAGEN_BASE_IMAGE=${BASE_IMAGE_TAG}" \
+            ./packaging/runtime-images

@@ -53,7 +53,11 @@ func TestRunStartPersistsReadySessionAndAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDefault() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summaries, err := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
 	if err != nil {
@@ -207,7 +211,11 @@ func TestStartCommandDetachPersistsReadySessionWithoutAttach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDefault() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summaries, err := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
 	if err != nil {
@@ -291,7 +299,11 @@ func TestRunAttachWithSessionIDUpdatesLastUsedAt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDefault(reopened) returned error: %v", err)
 	}
-	defer reopened.Close()
+	defer func() {
+		if closeErr := reopened.Close(); closeErr != nil {
+			t.Errorf("reopened.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summary, found, err := reopened.GetSummary(context.Background(), persisted.ID)
 	if err != nil {
@@ -425,7 +437,11 @@ func TestRunAttachSelectsMostRecentReadySessionForCurrentRepository(t *testing.T
 	if err != nil {
 		t.Fatalf("OpenDefault(reopened) returned error: %v", err)
 	}
-	defer reopened.Close()
+	defer func() {
+		if closeErr := reopened.Close(); closeErr != nil {
+			t.Errorf("reopened.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	olderSummary, found, err := reopened.GetSummary(context.Background(), older.ID)
 	if err != nil {
@@ -518,7 +534,11 @@ func TestRunAttachCreatesDistinctAgentSessionsForSameAgentType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDefault(reopened) returned error: %v", err)
 	}
-	defer reopened.Close()
+	defer func() {
+		if closeErr := reopened.Close(); closeErr != nil {
+			t.Errorf("reopened.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summary, found, err := reopened.GetSummary(context.Background(), persisted.ID)
 	if err != nil {
@@ -656,7 +676,11 @@ func TestRunStartPreflightConfigurationFailsBeforePersistingSession(t *testing.T
 	if err != nil {
 		t.Fatalf("OpenDefault() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summaries, err := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
 	if err != nil {
@@ -1028,7 +1052,11 @@ func TestRunStartDetachFailureCapturesFailureClassAndMarksSessionFailed(t *testi
 	if openErr != nil {
 		t.Fatalf("OpenDefault() returned error: %v", openErr)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summaries, listErr := store.List(context.Background(), session.ListOptions{RepoPath: repo.Path})
 	if listErr != nil {

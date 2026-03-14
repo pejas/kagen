@@ -9,7 +9,8 @@ This document records the container artefacts currently used on the kagen runtim
 - Proxy image: `ghcr.io/pejas/kagen-proxy:2026-03-12`
 
 These references are intentionally versioned rather than `latest`, so runtime
-behaviour does not drift between runs.
+behaviour does not drift between runs. The defaults are resolved through
+kagen's config stack rather than package-local runtime constants.
 
 The toolbox baseline is declared in:
 
@@ -26,10 +27,9 @@ launch.
 
 ## Ownership
 
-- `internal/workload` is the source of truth for baseline agent pod images.
-- `internal/cluster` is the source of truth for the proxy image used by the enforced egress path.
+- `internal/config` is the source of truth for default runtime image references.
 - `packaging/runtime-images/` contains the Dockerfiles and `mise` inputs used to build future first-party runtime artefacts.
-- Local validation can override the default refs with `KAGEN_WORKSPACE_IMAGE`, `KAGEN_TOOLBOX_IMAGE`, and `KAGEN_PROXY_IMAGE`.
+- Local validation can override the resolved refs with `KAGEN_IMAGES_WORKSPACE`, `KAGEN_IMAGES_TOOLBOX`, and `KAGEN_IMAGES_PROXY`.
 - Runtime preflight validates only launch-critical shape and resolution. It does not repair bad image refs, publish artefacts, or replace runtime-backed verification.
 
 ## Publish Workflow
@@ -43,6 +43,12 @@ launch.
 
 The workflow runs on Git tag pushes matching `v*` and on manual dispatch.
 
+The workflow first resolves a canonical image tag:
+
+- `inputs.tag` on manual dispatch, when supplied
+- otherwise the pushed Git tag with the leading `v` removed
+- otherwise the short Git commit SHA
+
 For a tag push such as `v1.2.3`, `docker/metadata-action` emits these tags for
 each image:
 
@@ -54,49 +60,48 @@ each image:
 
 The base image is built first. The workspace, toolbox, and proxy images are
 then built from `packaging/runtime-images/` and receive
-`KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ github.ref_name }}` as a build
-argument. On a version-tag push, `github.ref_name` is the pushed tag, so the
-dependent images consume the matching base-image tag.
+`KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:<resolved-tag>` as a build
+argument. The verification step checks the same resolved tag, so the workflow
+uses one consistent base-image reference across publication and validation.
 
-Manual dispatch is not equivalent to a version-tag push. The workflow allows a
-manual `inputs.tag`, but the dependent-image build still resolves
-`KAGEN_BASE_IMAGE` from `github.ref_name`, and the verification step also checks
-`${GITHUB_REF_NAME}`. In practice, manual dispatch is reliable only when the
-selected ref name already matches a published base-image tag. The release path
-for coherent versioned artefacts is a pushed Git tag such as `v2026-03-14` or
-`v1.2.3`.
+That means a release tag such as `v1.2.3` publishes runtime images tagged
+`1.2.3`, while manual dispatch can target any explicit image tag through
+`inputs.tag`.
 
 ## How Kagen Selects Runtime Images
 
 The publish workflow does not change the images used by `kagen start` on its
-own. Kagen resolves runtime images from code-level defaults first, then applies
-environment-variable overrides:
+own. Kagen resolves runtime images through the normal config stack:
 
-- Workspace and toolbox defaults are pinned in `internal/workload/builder.go`.
-- The proxy default is pinned in `internal/cluster/proxy.go`.
-- One-off overrides come from `KAGEN_WORKSPACE_IMAGE`,
-  `KAGEN_TOOLBOX_IMAGE`, and `KAGEN_PROXY_IMAGE`.
+- defaults in `internal/config`
+- global config in `~/.config/kagen/main.yml`
+- project config in `.kagen.yaml`
+- environment overrides from `KAGEN_IMAGES_WORKSPACE`,
+  `KAGEN_IMAGES_TOOLBOX`, and `KAGEN_IMAGES_PROXY`
 
-`.kagen.yaml` does not define image references. `kagen config write` does not
-persist them.
+`kagen config write` documents the optional `images` block in `.kagen.yaml`.
 
 Use overrides for local validation or temporary testing:
 
 ```bash
-export KAGEN_WORKSPACE_IMAGE=ghcr.io/pejas/kagen-workspace:1.2.3
-export KAGEN_TOOLBOX_IMAGE=ghcr.io/pejas/kagen-toolbox:1.2.3
-export KAGEN_PROXY_IMAGE=ghcr.io/pejas/kagen-proxy:1.2.3
+export KAGEN_IMAGES_WORKSPACE=ghcr.io/pejas/kagen-workspace:1.2.3
+export KAGEN_IMAGES_TOOLBOX=ghcr.io/pejas/kagen-toolbox:1.2.3
+export KAGEN_IMAGES_PROXY=ghcr.io/pejas/kagen-proxy:1.2.3
 kagen start codex
 ```
 
 To change the default image version used by kagen for every run, publish the
-replacement images first, then update the pinned refs in:
+replacement images first, then update config to point at them:
 
-- `internal/workload/builder.go`
-- `internal/cluster/proxy.go`
+```yaml
+images:
+  workspace: ghcr.io/pejas/kagen-workspace:1.2.3
+  toolbox: ghcr.io/pejas/kagen-toolbox:1.2.3
+  proxy: ghcr.io/pejas/kagen-proxy:1.2.3
+```
 
-That change is the runtime release point. Publishing a new image tag in GHCR is
-not sufficient until the pinned refs or the environment overrides point to it.
+That config change is the runtime release point. Publishing a new image tag in
+GHCR is not sufficient until resolved config points to it.
 
 ## Update Procedure
 
@@ -104,7 +109,7 @@ not sufficient until the pinned refs or the environment overrides point to it.
 2. Refresh `packaging/runtime-images/toolbox/mise.lock` with `make runtime-images-lock`.
 3. Build and publish the replacement image artefacts from `packaging/runtime-images/`.
 4. Verify the artefacts are pullable from the Colima/K3s runtime used by `kagen start`.
-5. Update the pinned references in `internal/workload/builder.go` and `internal/cluster/proxy.go`.
+5. Update the default image refs in `internal/config/config.go`, or point global or project config at the new tags.
 6. Run `make test` and `make build`.
 7. Run `make test-e2e` when the published artefacts are available and runtime-backed validation is needed.
 8. If the runtime contract changes, update `README.md` and any affected architecture documentation in the same change.

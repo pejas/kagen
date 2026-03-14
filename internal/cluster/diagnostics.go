@@ -153,7 +153,9 @@ func (i *DiagnosticsInspector) readContainerLog(ctx context.Context, namespace, 
 	if err != nil {
 		return "", fmt.Errorf("reading logs for %s/%s container %s: %w", namespace, podName, containerName, err)
 	}
-	defer stream.Close()
+	defer func() {
+		_ = stream.Close()
+	}()
 
 	content, err := io.ReadAll(stream)
 	if err != nil {

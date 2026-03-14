@@ -87,7 +87,11 @@ func TestOpenInitialisesSchemaAndPersistsSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open(reopened) returned error: %v", err)
 	}
-	defer reopened.Close()
+	defer func() {
+		if closeErr := reopened.Close(); closeErr != nil {
+			t.Errorf("reopened.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	got, err := reopened.List(ctx, ListOptions{})
 	if err != nil {
@@ -142,7 +146,11 @@ func TestListFiltersByRepositoryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	if _, err := store.CreateKagenSession(ctx, CreateKagenSessionParams{
 		RepoID:          "repo-1",
@@ -192,7 +200,11 @@ func TestFindMostRecentReadyFiltersByRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	older, err := store.CreateKagenSession(ctx, CreateKagenSessionParams{
 		RepoID:          "repo-1",
@@ -312,7 +324,11 @@ func TestRecordAttachUpdatesLastUsedAtForSessionAndAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	persisted, err := store.CreateKagenSession(ctx, CreateKagenSessionParams{
 		RepoID:          "repo-1",
@@ -383,7 +399,11 @@ func TestRecordAttachUpdatesOnlySelectedAgentSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open() returned error: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("store.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	persisted, err := store.CreateKagenSession(ctx, CreateKagenSessionParams{
 		RepoID:          "repo-1",

@@ -1,0 +1,227 @@
+name: Docker Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to use (defaults to short commit SHA)"
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: pejas/kagen
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+
+jobs:
+  build-and-push-base:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.resolve-tag.outputs.image_tag }}
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:master
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: resolve-tag
+        shell: bash
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            image_tag="${{ inputs.tag }}"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            image_tag="${GITHUB_REF_NAME#v}"
+          else
+            image_tag="$(git rev-parse --short HEAD)"
+          fi
+
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=,suffix=,format=short
+            type=raw,value=latest,enable=true
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=kagen-base
+            org.opencontainers.image.description=Base runtime image for kagen isolated development environments.
+            org.opencontainers.image.documentation=https://github.com/pejas/kagen/blob/main/packaging/runtime-images/README.md
+
+      - name: Build and push base image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./packaging/runtime-images/base
+          file: ./packaging/runtime-images/base/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Wait for image registry propagation
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 30
+          retry_wait_seconds: 5
+          command: docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ steps.resolve-tag.outputs.image_tag }}"
+
+  build-and-push-dependents:
+    needs: build-and-push-base
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    strategy:
+      matrix:
+        image:
+          - name: workspace
+            dockerfile: ./packaging/runtime-images/workspace/Dockerfile
+            context: ./packaging/runtime-images
+            description: Workspace runtime image for kagen isolated development environments.
+          - name: toolbox
+            dockerfile: ./packaging/runtime-images/toolbox/Dockerfile
+            context: ./packaging/runtime-images
+            description: Toolbox runtime image for kagen isolated development environments.
+          - name: proxy
+            dockerfile: ./packaging/runtime-images/proxy/Dockerfile
+            context: ./packaging/runtime-images
+            description: Proxy runtime image for kagen isolated development environments.
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:master
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.image.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=,suffix=,format=short
+            type=raw,value=latest,enable=true
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=kagen-${{ matrix.image.name }}
+            org.opencontainers.image.description=${{ matrix.image.description }}
+            org.opencontainers.image.documentation=https://github.com/pejas/kagen/blob/main/packaging/runtime-images/README.md
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: |
+            KAGEN_BASE_IMAGE=ghcr.io/pejas/kagen-base:${{ needs.build-and-push-base.outputs.image_tag }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.image.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  verify-images:
+    needs: [build-and-push-base, build-and-push-dependents]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify images exist
+        run: |
+          VERSION="${{ needs.build-and-push-base.outputs.image_tag }}"
+          for image in base workspace toolbox proxy; do
+            echo "Verifying ghcr.io/pejas/kagen-${image}:${VERSION}..."
+            docker manifest inspect "ghcr.io/pejas/kagen-${image}:${VERSION}" > /dev/null
+            echo "✓ kagen-${image}:${VERSION} exists"
+          done

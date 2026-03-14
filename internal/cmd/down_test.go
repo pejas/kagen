@@ -68,7 +68,11 @@ func TestRunDownStopsRuntimeAndLeavesPersistedSessionsUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDefault(reopened) returned error: %v", err)
 	}
-	defer reopened.Close()
+	defer func() {
+		if closeErr := reopened.Close(); closeErr != nil {
+			t.Errorf("reopened.Close() returned error: %v", closeErr)
+		}
+	}()
 
 	summary, found, err := reopened.GetSummary(context.Background(), persisted.ID)
 	if err != nil {

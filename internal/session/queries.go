@@ -120,12 +120,16 @@ func (s *Store) FindMostRecentReady(ctx context.Context, repoPath string) (Summa
 	return summaries[0], true, nil
 }
 
-func (s *Store) listSummaries(ctx context.Context, action, query string, args ...any) ([]Summary, error) {
+func (s *Store) listSummaries(ctx context.Context, action, query string, args ...any) (_ []Summary, err error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", action, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("%s: closing query rows: %w", action, closeErr)
+		}
+	}()
 
 	summaries, err := scanSummaries(rows)
 	if err != nil {

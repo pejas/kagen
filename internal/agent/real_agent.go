@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/pejas/kagen/internal/git"
 	"github.com/pejas/kagen/internal/kubeexec"
@@ -82,26 +81,6 @@ func (b *baseAgent) ensureStatePath(ctx context.Context, namespace string) error
 	}
 
 	return nil
-}
-
-func (b *baseAgent) waitForRuntime(ctx context.Context, namespace string) error {
-	for range 90 {
-		command := []string{
-			"/bin/sh", "-lc",
-			b.spec.ReadyCheck(),
-		}
-		if _, err := b.exec.Run(ctx, namespace, "agent", command, kubeexec.WithContainer(b.containerName)); err == nil {
-			return nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-	}
-
-	return fmt.Errorf("timed out waiting for %s runtime bootstrap in pod %s/agent", b.name, namespace)
 }
 
 // NewClaudeAgent returns a real Claude agent.
