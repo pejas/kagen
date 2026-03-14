@@ -213,6 +213,7 @@ func TestFetchURLStoresRefsWithoutPersistingRemoteConfig(t *testing.T) {
 	runGit(t, filepath.Dir(remote), "init", "--bare", remote)
 	runGit(t, remoteSource, "push", remote, "HEAD:main", "HEAD:kagen/main")
 	runGit(t, cloneDir, "clone", remote, ".")
+	runGit(t, cloneDir, "checkout", "main")
 
 	repo, err := Discover(cloneDir)
 	if err != nil {
