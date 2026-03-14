@@ -82,6 +82,14 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+      - name: Wait for image registry propagation
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 30
+          retry_wait_seconds: 10
+          command: docker buildx imagetools inspect "${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-base:${{ github.ref_name }}"
+
   build-and-push-dependents:
     needs: build-and-push-base
     runs-on: ubuntu-latest
