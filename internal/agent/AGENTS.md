@@ -17,11 +17,7 @@ Create `internal/agent/{agent_name}.go` with the following skeleton:
 ```go
 package agent
 
-import (
-	"context"
-
-	"github.com/pejas/kagen/internal/kubeexec"
-)
+import "path/filepath"
 
 // 1. Define the unique Type identifier
 const MyAgent Type = "myagent"
@@ -41,18 +37,15 @@ func (s myAgentRuntimeSpec) RequiredEnv() []EnvVar {
 		{Name: "PATH", Value: defaultToolboxPath, Source: EnvValueLiteral},
 		{Name: "TERM", Value: defaultTerm, Source: EnvValueLiteral},
 		// Declare agent-specific environment variables here
-		// Example:
-		// {Name: "MYAGENT_CONFIG_DIR", Value: ".myagent", Source: EnvValueSessionPathJoin},
 	}
 }
 
-// Configure executes early in the lifecycle before attach.
-// Ensure this returns nil if no configuration is needed.
-func (s myAgentRuntimeSpec) Configure(ctx context.Context, namespace, containerName string, exec kubeexec.Runner) error {
-	return nil
+// 3. Return configuration files to mount as ConfigMaps (return nil if none needed)
+func (s myAgentRuntimeSpec) ConfigFiles() []ConfigFile {
+	return nil // See opencode.go for an example with config files
 }
 
-// 3. Register the agent inside the package init()
+// 4. Register the agent inside the package init()
 func init() {
 	registerBaseAgent(myAgentRuntimeSpec{})
 }
@@ -70,15 +63,28 @@ Each `EnvVar` declares both a default value and how attach-time session isolatio
 
 Use `EnvValueSessionRoot` for variables such as `HOME` or `CODEX_HOME` that should point directly at the session root. Use `EnvValueSessionPathJoin` for config directories or files that should live beneath the session root. Keep unrelated variables such as `PATH` and `TERM` as `EnvValueLiteral`.
 
-## 2. Configuration Logic (Optional)
+## 2. Configuration Files (ConfigMap)
 
-If the agent requires a configuration file generated inside the container before attach (such as OpenCode disabling telemetry prompts), implement the `Configure` method.
+If the agent requires configuration files (such as OpenCode's `opencode.json`), return them from `ConfigFiles()`. These are mounted as Kubernetes ConfigMaps before pod startup - no runtime exec calls needed.
 
-Prefer declarative env resolution first. If a tool can be pointed at a session-specific path via `RequiredEnv()`, use that mechanism before adding imperative filesystem setup in `Configure`.
+```go
+func (s myAgentRuntimeSpec) ConfigFiles() []ConfigFile {
+	return []ConfigFile{
+		{
+			Name:      "config.json",                                    // ConfigMap key
+			MountPath: filepath.Join(s.StateRoot(), ".config", "config.json"), // Absolute path
+			Content: `{
+  "setting": "value"
+}
+`,
+		},
+	}
+}
+```
 
-Do not shell out via `os/exec`. You must use the provided `kubeexec.Runner` to run shell commands inside the running pod.
+The `MountPath` must be an absolute path. Use `filepath.Join` with `s.StateRoot()` for agent-scoped paths. ConfigMaps are mounted read-only using `subPath` to avoid overwriting parent directories.
 
-See `internal/agent/opencode.go` for an example of generating JSON configurations natively in bash.
+See `internal/agent/opencode.go` for a complete example.
 
 ## 3. Testing
 
@@ -87,12 +93,25 @@ Create `internal/agent/{agent_name}_test.go` to verify the `RuntimeSpec` logic p
 ```go
 package agent
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
-func TestMyAgentStateRoot(t *testing.T) {
+func TestMyAgentConfigFiles(t *testing.T) {
 	spec := myAgentRuntimeSpec{}
-	if got := spec.StateRoot(); got != "/home/kagen/.myagent" {
-		t.Errorf("StateRoot() = %q, want /home/kagen/.myagent", got)
+	configFiles := spec.ConfigFiles()
+	
+	// If your agent needs config files:
+	if len(configFiles) > 0 {
+		cf := configFiles[0]
+		if cf.Name != "config.json" {
+			t.Errorf("ConfigFile.Name = %q, want config.json", cf.Name)
+		}
+		if !filepath.IsAbs(cf.MountPath) {
+			t.Errorf("ConfigFile.MountPath = %q, want absolute path", cf.MountPath)
+		}
 	}
 }
 ```
@@ -109,10 +128,10 @@ make test
 
 - [ ] File named `{agent_name}.go` created.
 - [ ] `Type` constant exported.
-- [ ] `RuntimeSpec` fully implemented.
+- [ ] `RuntimeSpec` fully implemented (including `ConfigFiles()`).
 - [ ] Registered via `registerBaseAgent` in `init()`, unless a custom `Agent` implementation is required.
 - [ ] Session-scoped env vars use the correct `EnvValueSource`.
 - [ ] No agent-specific conditionals were added to shared infrastructure.
-- [ ] `Configure()` returns `nil` if no filesystem setup is required.
+- [ ] `ConfigFiles()` returns `nil` if no configuration files are needed.
 - [ ] Tested via `{agent_name}_test.go`.
 - [ ] Project tests pass (`make test`).
