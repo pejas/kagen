@@ -69,11 +69,11 @@ func TestBuilderBuildPodUsesInstallFreeToolboxBootstrap(t *testing.T) {
 	if runtimeContainer.Image != testImages().Toolbox {
 		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, testImages().Toolbox)
 	}
-	if len(runtimeContainer.Command) != len(spec.ToolboxBootstrapCommand()) {
-		t.Fatalf("runtime container command length = %d, want %d", len(runtimeContainer.Command), len(spec.ToolboxBootstrapCommand()))
+	if len(runtimeContainer.Command) != 2 {
+		t.Fatalf("runtime container command length = %d, want 2", len(runtimeContainer.Command))
 	}
-	if len(runtimeContainer.Args) != len(spec.ToolboxBootstrapArgs()) {
-		t.Fatalf("runtime container args length = %d, want %d", len(runtimeContainer.Args), len(spec.ToolboxBootstrapArgs()))
+	if len(runtimeContainer.Args) != 1 {
+		t.Fatalf("runtime container args length = %d, want 1", len(runtimeContainer.Args))
 	}
 	if got := runtimeContainer.Args[0]; got != "exec tail -f /dev/null" {
 		t.Fatalf("runtime container args[0] = %q, want install-free keepalive", got)
@@ -134,15 +134,15 @@ func assertBaselinePod(t *testing.T, pod *corev1.Pod, spec agent.RuntimeSpec) {
 	}
 
 	runtimeContainer := pod.Spec.Containers[1]
-	if runtimeContainer.Name != spec.ContainerName() {
-		t.Fatalf("runtime container name = %q, want %q", runtimeContainer.Name, spec.ContainerName())
+	if runtimeContainer.Name != agent.ContainerName(spec) {
+		t.Fatalf("runtime container name = %q, want %q", runtimeContainer.Name, agent.ContainerName(spec))
 	}
 	if runtimeContainer.Image != testImages().Toolbox {
 		t.Fatalf("runtime container image = %q, want %q", runtimeContainer.Image, testImages().Toolbox)
 	}
-	assertStringSliceEqual(t, "runtime command", runtimeContainer.Command, spec.ToolboxBootstrapCommand())
-	assertStringSliceEqual(t, "runtime args", runtimeContainer.Args, spec.ToolboxBootstrapArgs())
-	assertEnvMatches(t, runtimeContainer.Env, spec.RequiredEnvMap())
+	assertStringSliceEqual(t, "runtime command", runtimeContainer.Command, []string{"/bin/sh", "-lc"})
+	assertStringSliceEqual(t, "runtime args", runtimeContainer.Args, []string{"exec tail -f /dev/null"})
+	assertEnvMatches(t, runtimeContainer.Env, envVarMap(spec.RequiredEnv()))
 	if !hasMount(runtimeContainer.VolumeMounts, "git-workspace", defaultWorkspaceMount) {
 		t.Fatalf("runtime container missing workspace mount: %#v", runtimeContainer.VolumeMounts)
 	}
@@ -209,4 +209,13 @@ func hasMount(mounts []corev1.VolumeMount, name, path string) bool {
 	}
 
 	return false
+}
+
+func envVarMap(values []agent.EnvVar) map[string]string {
+	env := make(map[string]string, len(values))
+	for _, variable := range values {
+		env[variable.Name] = variable.Value
+	}
+
+	return env
 }

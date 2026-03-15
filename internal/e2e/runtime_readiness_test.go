@@ -476,14 +476,15 @@ func (h *readinessHarness) assertRuntimeReady(summary session.Summary, agentType
 
 	h.assertInitContainerCompleted(pod, "workspace-sync")
 	h.assertContainerReady(pod, "workspace")
-	h.assertContainerReady(pod, spec.ContainerName())
+	containerName := agent.ContainerName(spec)
+	h.assertContainerReady(pod, containerName)
 
-	workspaceBranch := strings.TrimSpace(h.execInRuntime(summary.Session.Namespace, spec.ContainerName(), `git -C /projects/workspace rev-parse --abbrev-ref HEAD`))
+	workspaceBranch := strings.TrimSpace(h.execInRuntime(summary.Session.Namespace, containerName, `git -C /projects/workspace rev-parse --abbrev-ref HEAD`))
 	if workspaceBranch != h.repo.KagenBranch() {
 		h.t.Fatalf("workspace branch in pod = %q, want %q", workspaceBranch, h.repo.KagenBranch())
 	}
 
-	workspaceHead := strings.TrimSpace(h.execInRuntime(summary.Session.Namespace, spec.ContainerName(), `git -C /projects/workspace rev-parse HEAD`))
+	workspaceHead := strings.TrimSpace(h.execInRuntime(summary.Session.Namespace, containerName, `git -C /projects/workspace rev-parse HEAD`))
 	if workspaceHead != h.repo.HeadSHA {
 		h.t.Fatalf("workspace HEAD in pod = %q, want %q", workspaceHead, h.repo.HeadSHA)
 	}
@@ -498,7 +499,7 @@ func (h *readinessHarness) assertRuntimeReady(summary session.Summary, agentType
 		h.t.Fatalf("state path = %q, want %q", stateSession.StatePath, expectedStatePath)
 	}
 
-	h.execInRuntime(summary.Session.Namespace, spec.ContainerName(), fmt.Sprintf(`test -d %q`, stateSession.StatePath))
+	h.execInRuntime(summary.Session.Namespace, containerName, fmt.Sprintf(`test -d %q`, stateSession.StatePath))
 	h.assertProxyResources(summary.Session.Namespace, requiredProxyHosts(agentType))
 }
 

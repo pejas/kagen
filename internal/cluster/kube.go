@@ -193,12 +193,12 @@ func injectAgentRuntime(pod *corev1.Pod, agentType, namespace string, policy *pr
 		return
 	}
 
-	container := runtimeContainer(pod, spec.ContainerName())
+	container := runtimeContainer(pod, agent.ContainerName(spec))
 	if container == nil {
 		container = &pod.Spec.Containers[0]
 	}
 
-	for _, variable := range spec.RequiredEnv {
+	for _, variable := range spec.RequiredEnv() {
 		setContainerEnv(container, variable.Name, variable.Value)
 	}
 
@@ -245,10 +245,10 @@ func injectGitAuthorship(container *corev1.Container, spec agent.RuntimeSpec) {
 	}
 
 	// Build agent author email using subaddressing (RFC 5233)
-	authorEmail := git.AddSubaddress(hostUser.Email, spec.GitAuthorName)
+	authorEmail := git.AddSubaddress(hostUser.Email, spec.GitAuthorName())
 
 	// Set git environment variables
-	setContainerEnv(container, "GIT_AUTHOR_NAME", spec.GitAuthorName)
+	setContainerEnv(container, "GIT_AUTHOR_NAME", spec.GitAuthorName())
 	setContainerEnv(container, "GIT_AUTHOR_EMAIL", authorEmail)
 	setContainerEnv(container, "GIT_COMMITTER_NAME", hostUser.Name)
 	setContainerEnv(container, "GIT_COMMITTER_EMAIL", hostUser.Email)

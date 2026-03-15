@@ -64,7 +64,7 @@ func TestRuntimeValidatorClassifiesBinaryFailure(t *testing.T) {
 	}
 	validator := NewRuntimeValidatorWithRunner(stubRunner{
 		run: func(_ context.Context, _ string, _ string, command []string, _ ...kubeexec.Option) (string, error) {
-			if command[2] == spec.BinaryPreflightCheck() {
+			if command[2] == agent.BinaryPreflightCheck(spec) {
 				return "", errors.New("command not found")
 			}
 			return "/opt/mise/shims/codex", nil

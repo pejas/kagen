@@ -210,12 +210,12 @@ func (v *RuntimeValidator) Validate(ctx context.Context, repo *git.Repository, a
 		return report, err
 	}
 	namespace := fmt.Sprintf("kagen-%s", repo.ID())
-	opts := []kubeexec.Option{kubeexec.WithContainer(spec.ContainerName())}
+	opts := []kubeexec.Option{kubeexec.WithContainer(agent.ContainerName(spec))}
 
 	if err := v.runCheck(ctx, namespace, spec, CheckWorkspaceMount, workspaceCheckScript(), opts, &report); err != nil {
 		return report, err
 	}
-	if err := v.runCheck(ctx, namespace, spec, CheckAgentBinary, spec.BinaryPreflightCheck(), opts, &report); err != nil {
+	if err := v.runCheck(ctx, namespace, spec, CheckAgentBinary, agent.BinaryPreflightCheck(spec), opts, &report); err != nil {
 		return report, err
 	}
 	if err := v.runCheck(ctx, namespace, spec, CheckAgentHome, homeCheckScript(spec.StateRoot()), opts, &report); err != nil {
@@ -288,7 +288,7 @@ func checkMetadata(name string, spec agent.RuntimeSpec, output string) map[strin
 	case CheckWorkspaceMount:
 		return map[string]string{"path": "/projects/workspace"}
 	case CheckAgentBinary:
-		metadata := map[string]string{"binary": spec.Binary}
+		metadata := map[string]string{"binary": spec.Binary()}
 		if output != "" {
 			metadata["path"] = output
 		}
@@ -318,7 +318,7 @@ func failedSummary(name string, spec agent.RuntimeSpec) string {
 	case CheckWorkspaceMount:
 		return "workspace bootstrap did not produce a writable /projects/workspace checkout"
 	case CheckAgentBinary:
-		return fmt.Sprintf("runtime binary %q is not available in the toolbox image", spec.Binary)
+		return fmt.Sprintf("runtime binary %q is not available in the toolbox image", spec.Binary())
 	case CheckAgentHome:
 		return fmt.Sprintf("agent home root %q is not writable", spec.StateRoot())
 	default:
