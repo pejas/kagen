@@ -80,6 +80,12 @@ func (k *KubeManager) EnsureResources(ctx context.Context, repo *git.Repository,
 	pod.Labels["kagen.io/repo-id"] = repo.ID()
 	injectWorkspaceSync(pod, repo)
 	injectAgentRuntime(pod, agentType, nsName, policy)
+
+	// Create ConfigMaps for agent configuration files before creating the pod.
+	if err := k.ensureAgentConfigMaps(ctx, nsName, agentType); err != nil {
+		return fmt.Errorf("ensuring agent config maps: %w", err)
+	}
+
 	ui.Verbose("Reconciling pod %s/%s", nsName, pod.Name)
 
 	// 2. Ensure PVCs for volumes requested by the generated runtime pod.
@@ -205,8 +211,40 @@ func injectAgentRuntime(pod *corev1.Pod, agentType, namespace string, policy *pr
 	// Inject git authorship configuration
 	injectGitAuthorship(container, spec)
 
+	// Inject ConfigMap volumes for agent configuration files
+	injectConfigFiles(pod, container, agentType, spec)
+
 	if policyEnabled(policy) {
 		injectProxyEnv(container, namespace)
+	}
+}
+
+func injectConfigFiles(pod *corev1.Pod, container *corev1.Container, agentType string, spec agent.RuntimeSpec) {
+	configFiles := spec.ConfigFiles()
+	if len(configFiles) == 0 {
+		return
+	}
+
+	cmName := fmt.Sprintf("kagen-agent-config-%s", agentType)
+
+	// Add ConfigMap volume to pod
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: "agent-config",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: cmName},
+			},
+		},
+	})
+
+	// Add volume mounts for each config file using subPath
+	for _, cf := range configFiles {
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      "agent-config",
+			MountPath: cf.MountPath,
+			SubPath:   cf.Name,
+			ReadOnly:  true,
+		})
 	}
 }
 
@@ -328,6 +366,42 @@ func (k *KubeManager) ensurePVC(ctx context.Context, ns, name string) error {
 	_, err := k.client.CoreV1().PersistentVolumeClaims(ns).Create(ctx, pvc, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return fmt.Errorf("creating pvc %s/%s: %w", ns, name, err)
+	}
+
+	return nil
+}
+
+func (k *KubeManager) ensureAgentConfigMaps(ctx context.Context, namespace, agentType string) error {
+	spec, err := agent.SpecFor(agent.Type(agentType))
+	if err != nil {
+		return nil
+	}
+
+	configFiles := spec.ConfigFiles()
+	if len(configFiles) == 0 {
+		return nil
+	}
+
+	cmName := fmt.Sprintf("kagen-agent-config-%s", agentType)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cmName,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kagen.io/component": "agent-config",
+				"kagen.io/agent":     agentType,
+			},
+		},
+		Data: make(map[string]string),
+	}
+
+	for _, cf := range configFiles {
+		cm.Data[cf.Name] = cf.Content
+	}
+
+	_, err = k.client.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
+	if err != nil && !errors.IsAlreadyExists(err) {
+		return fmt.Errorf("creating configmap %s/%s: %w", namespace, cmName, err)
 	}
 
 	return nil

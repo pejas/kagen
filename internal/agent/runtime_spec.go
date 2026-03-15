@@ -1,12 +1,9 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"path"
 	"strings"
-
-	"github.com/pejas/kagen/internal/kubeexec"
 )
 
 const defaultHomeDir = "/home/kagen"
@@ -29,6 +26,13 @@ const (
 	EnvValueSessionPathJoin
 )
 
+// ConfigFile defines a configuration file to be mounted as a ConfigMap.
+type ConfigFile struct {
+	Name      string // ConfigMap key and filename
+	MountPath string // Absolute path inside container
+	Content   string // File content
+}
+
 // RuntimeSpec describes how kagen bootstraps and attaches to an agent runtime.
 type RuntimeSpec interface {
 	Type() Type
@@ -38,7 +42,7 @@ type RuntimeSpec interface {
 	AttachShell() string
 	StateRoot() string
 	RequiredEnv() []EnvVar
-	Configure(ctx context.Context, namespace, containerName string, exec kubeexec.Runner) error
+	ConfigFiles() []ConfigFile
 }
 
 // DefaultHomeDir returns the shared runtime home directory inside the pod.
