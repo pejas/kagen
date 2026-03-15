@@ -1,26 +1,23 @@
 # Kagen
 
-![Kagen](docs/kagen.png)
+Kagen is a local, security-first agent runtime. It isolates AI agents from your host and the internet by running them inside a Kubernetes VM, with an in-cluster git forge acting as a review boundary.
 
-## What
-Kagen is a local, security-first agent runtime for Git repositories.
+**Security properties:**
+- Isolation: Agents run in Kubernetes; your host checkout stays canonical
+- Egress control: Proxy enforces allowlist before agents reach external networks
+- Reviewboundary: Agent commits accumulate in an in-cluster forge; pulling back requires explicit `kagen pull`
 
-## Why
-It isolates AI agents from your host system and the internet. Kagen generates the runtime workload internally and provisions the selected agent inside the Colima VM so the host checkout remains outside the execution boundary.
+##Prerequisites
 
-Changes made by the agent are accumulated in an isolated, in-cluster Forgejo instance. This provides a clear, reviewable boundary before any code is pulled back into your canonical local branch.
+- Go 1.26+
+- Colima
+- kubectl
 
-## How
+```bash
+brew install colima kubernetes-cli
+```
 
-Quick docs:
-- [Internals Blueprint](docs/INTERNALS-BLUEPRINT.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [E2E Scope](docs/E2E.md)
-- [Maintainer Checklist](docs/MAINTAINER-CHECKLIST.md)
-
-### Installation
-
-Requires Go 1.26.1, matching `go.mod`.
+## Installation
 
 ```bash
 git clone https://github.com/pejas/kagen.git
@@ -28,145 +25,37 @@ cd kagen
 make install
 ```
 
-### Usage
-
-Write optional repository defaults for Codex (not required before `start` or `attach`):
+## Quick Start
 
 ```bash
-kagen config write
+kagen start codex      # Start a new isolated session
+kagen list             # Show persisted sessions
+kagen attach codex     # Reattach to last session
+kagen down             # Stop the runtime
 ```
 
-Rewrite the optional project config with a different default agent:
+## Workflow
 
-```bash
-kagen config write --agent codex --force
-```
+1. `kagen start <agent>` - provisions the runtime, imports your repo, and attaches
+2. Work inside the agent; changes push to the in-cluster forge
+3. `kagen open` - open the review page
+4. `kagen pull` - pull reviewed changes back to your local branch
 
-Override runtime image refs through config or environment:
+Exiting the agent TUI only detaches; the session persists.
 
-```yaml
-images:
-  workspace: ghcr.io/pejas/kagen-workspace:0.1.4
-  toolbox: ghcr.io/pejas/kagen-toolbox:0.1.4
-  proxy: ghcr.io/pejas/kagen-proxy:0.1.4
-```
+## Documentation
 
-```bash
-export KAGEN_IMAGES_WORKSPACE=ghcr.io/pejas/kagen-workspace:0.1.4
-export KAGEN_IMAGES_TOOLBOX=ghcr.io/pejas/kagen-toolbox:0.1.4
-export KAGEN_IMAGES_PROXY=ghcr.io/pejas/kagen-proxy:0.1.4
-```
+- [Internals Blueprint](docs/INTERNALS-BLUEPRINT.md) - command flow
+- [Architecture](docs/ARCHITECTURE.md) - system design
+- [Usage](docs/USAGE.md) - detailed command reference
 
-Start a new session:
-
-```bash
-kagen start codex
-```
-
-Start a new session without interactive attach, for automation or readiness checks:
-
-```bash
-kagen start --detach codex
-```
-
-Attach a new agent session to the most recent ready kagen session for the current repository:
-
-```bash
-kagen attach codex
-```
-
-List persisted sessions for the current repository:
-
-```bash
-kagen list
-```
-
-Summarise diagnostics for the most recent persisted session in the current repository:
-
-```bash
-kagen doctor
-```
-
-Shut down the whole local Kagen runtime environment:
-
-```bash
-kagen down
-```
-
-For Codex, Kagen:
-- imports the host repository into the in-cluster Forgejo boundary,
-- clones that repository into `/projects/workspace` inside the agent pod,
-- persists Codex state in a dedicated PVC mounted at `/home/kagen/.codex`,
-- launches Codex with `danger-full-access` and `never` approval mode inside the VM, not on the host.
-
-The runtime bootstrap path assumes prebuilt toolbox and proxy artefacts. Pod startup does not install agent CLIs or proxy packages with `apt-get`, `npm install`, or similar package-manager steps.
-
-Existing repository `devfile.yaml` files are treated as legacy repository artefacts: `kagen config write` does not create them, and `kagen start` and `kagen attach` ignore them.
-
-Leaving an agent TUI with `/exit` or `/quit` only detaches from that tool. `kagen config write` only writes optional repo defaults. `kagen down` stops the whole local Colima/K3s runtime environment, while persisted kagen sessions and agent sessions remain in the local store and continue to appear in `kagen list`.
-
-`kagen start --detach` runs the same runtime, import, preflight, proxy-validation, and agent-state preparation path as interactive `kagen start`, but exits before terminal attach. Use it when automation needs a non-interactive readiness contract, then attach later with `kagen attach <agent> --session <id>`.
-
-Enable verbose output:
-
-```bash
-kagen --verbose
-```
-
-With `--verbose`, `kagen start` and `kagen attach` emit a runtime step trace that identifies the active phase, its outcome, and its duration. Failure output names the exact failed step in the top-level error.
-
-`kagen doctor` is read-only. It reports the latest persisted operation trace for the selected session, the persisted session status, the current runtime pod and container state when the runtime is already running, proxy enforcement state, and the failure artefact directory when one exists. Use `kagen doctor --session <id>` to inspect an older session directly.
-
-Open the review page for the current branch:
-
-```bash
-kagen open
-```
-
-`kagen open` establishes its own local Forgejo review tunnel and keeps it open until you interrupt the command.
-
-Pull reviewed changes back into the local branch:
-
-```bash
-kagen pull
-```
-
-`kagen start`, `kagen open`, and `kagen pull` use transient Forgejo transport. They do not persist a credentialed `kagen` remote or ephemeral localhost port into the host repository's `.git/config`.
-
-### Development
-
-Build from source:
+## Development
 
 ```bash
 make build
-```
-
-Run tests:
-
-```bash
 make test
-```
-
-Run lint:
-
-```bash
 make lint
+make test-e2e    # requires full runtime stack
 ```
 
-Run the end-to-end suite explicitly:
-
-```bash
-make test-e2e
-```
-
-Local tooling expected by the checked-in workflow:
-
-- Go matching `go.mod`
-- `golangci-lint` matching [`.golangci-lint-version`](/Users/pejas/Projects/kagen/.golangci-lint-version)
-- `kubectl`
-- `colima` for runtime-backed manual or E2E validation
-
-`make test` intentionally excludes `internal/e2e` so the default validation loop stays fast and does not require the full local runtime stack. Use `make test-e2e` when you specifically want end-to-end coverage. The repository CI contract mirrors `make build`, `make test`, and `make lint`.
-
-Runtime artefacts are release-managed. See [docs/RUNTIME-ARTEFACTS.md](/Users/pejas/Projects/kagen/docs/RUNTIME-ARTEFACTS.md) for the current image set and update procedure.
-The Phase 1 first-party image scaffold lives under `packaging/runtime-images/`, with the default toolbox toolchain declared in `packaging/runtime-images/toolbox/mise.toml` and frozen in `packaging/runtime-images/toolbox/mise.lock`.
+See [CONVENTIONS.md](docs/CONVENTIONS.md) for coding standards.
