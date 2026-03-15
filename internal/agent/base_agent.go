@@ -72,11 +72,7 @@ func (b *baseAgent) Prepare(ctx context.Context) error {
 	}
 
 	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
-	if err := b.ensureStatePath(ctx, ns); err != nil {
-		return err
-	}
-
-	return b.spec.Configure(ctx, ns, b.containerName, b.exec)
+	return b.ensureStatePath(ctx, ns)
 }
 
 // Attach connects the user's terminal to the agent process in the cluster.

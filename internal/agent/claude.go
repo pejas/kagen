@@ -1,11 +1,5 @@
 package agent
 
-import (
-	"context"
-
-	"github.com/pejas/kagen/internal/kubeexec"
-)
-
 type claudeRuntimeSpec struct{}
 
 func (claudeRuntimeSpec) Type() Type {
@@ -41,7 +35,7 @@ func (claudeRuntimeSpec) RequiredEnv() []EnvVar {
 	}
 }
 
-func (claudeRuntimeSpec) Configure(context.Context, string, string, kubeexec.Runner) error {
+func (claudeRuntimeSpec) ConfigFiles() []ConfigFile {
 	return nil
 }
 

@@ -1,11 +1,6 @@
 package agent
 
-import (
-	"context"
-	"fmt"
-
-	"github.com/pejas/kagen/internal/kubeexec"
-)
+import "path/filepath"
 
 type openCodeRuntimeSpec struct{}
 
@@ -41,31 +36,18 @@ func (openCodeRuntimeSpec) RequiredEnv() []EnvVar {
 	}
 }
 
-func (s openCodeRuntimeSpec) Configure(ctx context.Context, namespace, containerName string, exec kubeexec.Runner) error {
-	configDir := s.StateRoot() + "/.config"
-	configPath := configDir + "/opencode.json"
-
-	checkCmd := []string{"/bin/sh", "-lc", fmt.Sprintf("test -f %s", configPath)}
-	if _, err := exec.Run(ctx, namespace, "agent", checkCmd, kubeexec.WithContainer(containerName)); err == nil {
-		return nil
-	}
-
-	mkdirCmd := []string{"/bin/mkdir", "-p", configDir}
-	if _, err := exec.Run(ctx, namespace, "agent", mkdirCmd, kubeexec.WithContainer(containerName)); err != nil {
-		return fmt.Errorf("creating opencode config directory: %w", err)
-	}
-
-	configContent := `{
+func (s openCodeRuntimeSpec) ConfigFiles() []ConfigFile {
+	return []ConfigFile{
+		{
+			Name:      "opencode.json",
+			MountPath: filepath.Join(s.StateRoot(), ".config", "opencode.json"),
+			Content: `{
   "$schema": "https://opencode.ai/config.json",
   "permission": "allow"
 }
-`
-	writeCmd := []string{"/bin/sh", "-lc", fmt.Sprintf("cat > %s << 'EOF'\n%sEOF", configPath, configContent)}
-	if _, err := exec.Run(ctx, namespace, "agent", writeCmd, kubeexec.WithContainer(containerName)); err != nil {
-		return fmt.Errorf("writing opencode config: %w", err)
+`,
+		},
 	}
-
-	return nil
 }
 
 func init() {
