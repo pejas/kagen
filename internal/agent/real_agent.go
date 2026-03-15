@@ -47,7 +47,50 @@ func (b *baseAgent) Prepare(ctx context.Context) error {
 	}
 
 	ns := fmt.Sprintf("kagen-%s", b.repo.ID())
-	return b.ensureStatePath(ctx, ns)
+	if err := b.ensureStatePath(ctx, ns); err != nil {
+		return err
+	}
+
+	return b.configureAgent(ctx, ns)
+}
+
+// configureAgent writes agent-specific configuration files.
+func (b *baseAgent) configureAgent(ctx context.Context, namespace string) error {
+	switch b.spec.Type {
+	case OpenCode:
+		return b.configureOpenCode(ctx, namespace)
+	default:
+		return nil
+	}
+}
+
+// configureOpenCode writes opencode config to disable permission prompts
+// inside the insulated container environment.
+func (b *baseAgent) configureOpenCode(ctx context.Context, namespace string) error {
+	configDir := b.spec.StateRoot() + "/.config"
+	configPath := configDir + "/opencode.json"
+
+	checkCmd := []string{"/bin/sh", "-lc", fmt.Sprintf("test -f %s", configPath)}
+	if _, err := b.exec.Run(ctx, namespace, "agent", checkCmd, kubeexec.WithContainer(b.containerName)); err == nil {
+		return nil
+	}
+
+	mkdirCmd := []string{"/bin/mkdir", "-p", configDir}
+	if _, err := b.exec.Run(ctx, namespace, "agent", mkdirCmd, kubeexec.WithContainer(b.containerName)); err != nil {
+		return fmt.Errorf("creating opencode config directory: %w", err)
+	}
+
+	configContent := `{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow"
+}
+`
+	writeCmd := []string{"/bin/sh", "-lc", fmt.Sprintf("cat > %s << 'EOF'\n%sEOF", configPath, configContent)}
+	if _, err := b.exec.Run(ctx, namespace, "agent", writeCmd, kubeexec.WithContainer(b.containerName)); err != nil {
+		return fmt.Errorf("writing opencode config: %w", err)
+	}
+
+	return nil
 }
 
 // Attach connects the user's terminal to the agent process in the cluster.
