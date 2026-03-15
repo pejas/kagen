@@ -7,7 +7,7 @@ Kagen is a local, security-first agent runtime. It isolates AI agents from your 
 - Egress control: Proxy enforces allowlist before agents reach external networks
 - Reviewboundary: Agent commits accumulate in an in-cluster forge; pulling back requires explicit `kagen pull`
 
-##Prerequisites
+## Prerequisites
 
 - Go 1.26+
 - Colima

@@ -191,7 +191,7 @@ func resolvedAgentContainer(agentType string, operation diagnostics.Operation, o
 		return ""
 	}
 
-	return spec.ContainerName()
+	return agent.ContainerName(spec)
 }
 
 func latestAgentSession(summary session.Summary) session.AgentSession {

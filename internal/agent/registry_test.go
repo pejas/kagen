@@ -50,6 +50,23 @@ func TestRegistryAvailable(t *testing.T) {
 	}
 }
 
+func TestRegistryRegisteredAgents(t *testing.T) {
+	t.Parallel()
+
+	reg := NewRegistry(nil, "")
+	registered := reg.RegisteredAgents()
+	if len(registered) != 3 {
+		t.Fatalf("expected 3 registered agents, got %d", len(registered))
+	}
+
+	expected := []Type{Claude, Codex, OpenCode}
+	for i, agentType := range expected {
+		if registered[i] != agentType {
+			t.Fatalf("RegisteredAgents()[%d] = %q, want %q", i, registered[i], agentType)
+		}
+	}
+}
+
 func TestTypeFromString(t *testing.T) {
 	t.Parallel()
 

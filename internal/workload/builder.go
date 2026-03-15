@@ -45,7 +45,7 @@ func (b *Builder) BuildPod(req Request) (*corev1.Pod, error) {
 	if req.Namespace == "" {
 		return nil, fmt.Errorf("workload namespace is required")
 	}
-	if req.Runtime.Type == "" {
+	if req.Runtime == nil || req.Runtime.Type() == "" {
 		return nil, fmt.Errorf("runtime type is required")
 	}
 
@@ -98,11 +98,11 @@ func workspaceContainer(images Images) corev1.Container {
 
 func runtimeContainer(spec agent.RuntimeSpec, images Images) corev1.Container {
 	return corev1.Container{
-		Name:       spec.ContainerName(),
+		Name:       agent.ContainerName(spec),
 		Image:      images.Toolbox,
-		Command:    spec.ToolboxBootstrapCommand(),
-		Args:       spec.ToolboxBootstrapArgs(),
-		Env:        requiredEnv(spec.RequiredEnv),
+		Command:    []string{"/bin/sh", "-lc"},
+		Args:       []string{"exec tail -f /dev/null"},
+		Env:        requiredEnv(spec.RequiredEnv()),
 		WorkingDir: defaultWorkspaceMount + "/workspace",
 		VolumeMounts: []corev1.VolumeMount{
 			{

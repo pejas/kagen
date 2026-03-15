@@ -648,7 +648,7 @@ func agentContainerName(agentType agent.Type) string {
 		return ""
 	}
 
-	return spec.ContainerName()
+	return agent.ContainerName(spec)
 }
 
 func startTraceSteps(options StartOptions) []string {

@@ -235,8 +235,9 @@ func launchAgentRuntime(ctx context.Context, repo *git.Repository, kubeCtx strin
 	}
 
 	ui.Info("Launching agent %s...", agentType)
-	registry := agent.NewRegistry(repo, kubeCtx).WithContainer(spec.ContainerName())
-	ui.Verbose("Launching container %s in namespace kagen-%s", spec.ContainerName(), repo.ID())
+	containerName := agent.ContainerName(spec)
+	registry := agent.NewRegistry(repo, kubeCtx).WithContainer(containerName)
+	ui.Verbose("Launching container %s in namespace kagen-%s", containerName, repo.ID())
 	a, err := registry.Get(agentType)
 	if err != nil {
 		return err
@@ -255,7 +256,7 @@ func prepareAgentState(ctx context.Context, repo *git.Repository, kubeCtx string
 	}
 
 	registry := agent.NewRegistry(repo, kubeCtx).
-		WithContainer(spec.ContainerName()).
+		WithContainer(agent.ContainerName(spec)).
 		WithStatePath(agentSession.StatePath)
 	a, err := registry.Get(agentType)
 	if err != nil {
@@ -276,7 +277,7 @@ func attachAgent(ctx context.Context, repo *git.Repository, kubeCtx string, agen
 	}
 
 	registry := agent.NewRegistry(repo, kubeCtx).
-		WithContainer(spec.ContainerName()).
+		WithContainer(agent.ContainerName(spec)).
 		WithStatePath(agentSession.StatePath)
 	a, err := registry.Get(agentType)
 	if err != nil {
